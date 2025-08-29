@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smalldi"
+version = "0.1.0"
+description = "Small, annotation-driven dependency injection for Python."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Anna-Sofia Kasierocka", email = "f104a@f104a.io" }]
+keywords = ["dependency injection", "di", "typing", "annotations"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+  "typing-extensions>=4.5; python_version>='3.11'"
+]
+
+[project.urls]
+Homepage = "https://github.com/0xf104a/smalldi"
+Documentation = "https://github.com/0xf104a/smalldi#readme"
+Source = "https://github.com/0xf104a/smalldi"
+Issues = "https://github.com/0xf104a/smalldi/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smalldi"]
+include = [
+  "src/smalldi/py.typed",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+  "/CHANGELOG.md",
+]
