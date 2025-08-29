@@ -5,7 +5,7 @@ from smalldi.annotation import _Provide, Provide
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = ["Injector", "Provide"]
 
 @staticclass

@@ -49,8 +49,15 @@ if __name__ == '__main__':
 
 # Library logic
 ## Injector
-Injector is a static class(i.e. one that should never be instantiated) storing all singletons
-and responsible for injecting those singletons to a functions.
+Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
+DI container inside the library. Injector provides two decorators:
+* `@Injector.singleton` creates an instance of a class which may further be injected in functions
+* `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton
+
+### Singletons
+Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
+than annotated with `Provide[]` type. Only singletons may be decorated with `@Injector.singleton`. As a consequence, 
+only singleton classes may be injected at the current state of library development.
 
 ## Provide
 `Provide[T]` is an annotation for injector telling it that instead of this argument

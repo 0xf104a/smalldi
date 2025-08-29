@@ -1,6 +1,4 @@
 import pytest
-from typing import List, Dict, Any
-from unittest.mock import patch, MagicMock
 
 from smalldi import Injector
 from smalldi.annotation import _Provide
