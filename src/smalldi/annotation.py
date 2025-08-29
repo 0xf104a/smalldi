@@ -20,7 +20,7 @@ class _Provide(Generic[_T]):
         if origin is Annotated:
             args = get_args(tp)
             inner, *meta = args
-            if any(m is Provide for m in meta):
+            if any(m is _Provide for m in meta):
                 return inner
 
         raise TypeError(f"Expected Provide[T], got {tp!r}")

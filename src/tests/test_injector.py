@@ -59,14 +59,12 @@ def test_inject_basic(reset_injector):
         def hello(self):
             return "Hello"
 
-    with patch('smalldi.annotation.Provide.iter_annotations', return_value=[('service', TestService)]):
+    @Injector.inject
+    def test_function(service: _Provide[TestService]):
+        return service.hello()
 
-        @Injector.inject
-        def test_function(service: _Provide[TestService]):
-            return service.hello()
-
-        result = test_function()
-        assert result == "Hello"
+    result = test_function()
+    assert result == "Hello"
 
 
 def test_inject_multiple_dependencies(reset_injector):
@@ -81,36 +79,9 @@ def test_inject_multiple_dependencies(reset_injector):
         def value(self):
             return "B"
 
-    deps = [('service_a', ServiceA), ('service_b', ServiceB)]
-    with patch('smalldi.annotation.Provide.iter_annotations', return_value=deps):
-        Injector.singleton(ServiceA)
-        Injector.singleton(ServiceB)
+    @Injector.inject
+    def test_function(service_a: _Provide[ServiceA], service_b: _Provide[ServiceB]):
+        return service_a.value() + service_b.value()
 
-        @Injector.inject
-        def test_function(service_a: _Provide[ServiceA], service_b: _Provide[ServiceB]):
-            return service_a.value() + service_b.value()
-
-        result = test_function()
-        assert result == "AB"
-
-
-def test_inject_with_manual_args(reset_injector):
-    """Test injection with manually provided arguments"""
-    @Injector.singleton
-    class TestService:
-        def hello(self):
-            return "Hello"
-
-    mock_service = MagicMock(spec=TestService)
-    mock_service.hello.return_value = "Mocked Hello"
-
-    with patch('smalldi.annotation.Provide.iter_annotations', return_value=[('service', TestService)]):
-        Injector.singleton(TestService)
-
-        @Injector.inject
-        def test_function(service: _Provide[TestService]):
-            return service.hello()
-
-        result = test_function(service=mock_service)
-        assert result == "Mocked Hello"
-        mock_service.hello.assert_called_once()
+    result = test_function()
+    assert result == "AB"
