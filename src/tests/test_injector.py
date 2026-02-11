@@ -12,7 +12,6 @@ def reset_injector():
 
     yield
 
-    # Відновлюємо стан після тесту
     Injector.singletons_available.clear()
     Injector.singletons_available.update(old_singletons)
 
