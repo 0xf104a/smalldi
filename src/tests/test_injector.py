@@ -4,32 +4,20 @@ from smalldi import Injector
 from smalldi.annotation import _Provide
 
 
-@pytest.fixture
-def reset_injector():
-    """Reset Injector state before each test"""
-    old_singletons = Injector.singletons_available.copy()
-    Injector.singletons_available.clear()
-
-    yield
-
-    Injector.singletons_available.clear()
-    Injector.singletons_available.update(old_singletons)
-
-
 def test_singleton_registration(reset_injector):
     """Test that singleton decorator registers class instance"""
-    assert len(Injector.singletons_available) == 0
+    assert len(Injector._singletons_available) == 0
 
     @Injector.singleton
     class TestService:
         def hello(self):
             return "Hello"
 
-    assert len(Injector.singletons_available) == 1
-    assert TestService in Injector.singletons_available
-    assert isinstance(Injector.singletons_available[TestService], TestService)
+    assert len(Injector._singletons_available) == 1
+    assert TestService in Injector._singletons_available
+    assert isinstance(Injector._singletons_available[TestService], TestService)
 
-    service = Injector.singletons_available[TestService]
+    service = Injector._singletons_available[TestService]
     assert service.hello() == "Hello"
 
 

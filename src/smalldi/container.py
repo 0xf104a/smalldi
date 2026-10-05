@@ -43,11 +43,11 @@ class Container:
 
     @classmethod
     def _register_component(cls, component: Any, args: tuple[Any], kwargs: dict[str, Any]):
-        if cls not in Injector.singletons_available:
+        if cls not in Injector._singletons_available:
             raise TypeError(f"Injector must be a singleton to use components")
         if component is None:
             raise TypeError("Component cannot be None")
-        this = Injector.singletons_available[cls]
+        this = Injector._singletons_available[cls]
         this.components.append(ComponentRegistration(component, args, kwargs))
         this._on_component_register(ComponentRegistration(component, args, kwargs))
 
