@@ -119,7 +119,15 @@ class FishBowl(Bowl):
     def fill(self) -> str:
         return "Fish!"
 
-# Ask for the interface, get the implementation
+# Replace the baseline implementation, e.g. in a plugin or in tests.
+# An interface may be overridden only once
+@Injector.override(Bowl)
+@Injector.singleton
+class MilkBowl(Bowl):
+    def fill(self) -> str:
+        return "Milk!"
+
+# Ask for the interface, get the implementation (MilkBowl here)
 @Injector.inject
 def feed(bowl: Provide[Bowl]):
     print(bowl.fill())
@@ -131,10 +139,11 @@ if __name__ == '__main__':
 # Library structure
 ## Injector
 Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
-DI container inside the library. Injector provides three decorators:
+DI container inside the library. Injector provides four decorators:
 * `@Injector.singleton` creates an instance of a class which may further be injected in functions
 * `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton
 * `@Injector.implements(Interface)` binds a singleton to an interface, so `Provide[Interface]` injects it
+* `@Injector.override(Interface)` replaces the implementation bound with `@Injector.implements`
 
 Dependencies are resolved when `@Injector.inject` is applied, not when the function is called, so every
 injected singleton must be declared before the function which uses it.
@@ -150,9 +159,30 @@ parameters annotated with `Provide[Interface]` receive the instance of that sing
 be a concrete subclass of the interface and must already be a singleton, i.e. `@Injector.implements` goes above
 `@Injector.singleton`. The class is still injectable directly as `Provide[Implementation]`.
 
-An interface may be rebound to another implementation (e.g. in tests or plugins) until it is injected for the first
-time. After that the binding is frozen and rebinding to a different implementation raises `InterfaceFrozenError`,
-because functions which were already decorated hold the old implementation.
+Each interface has exactly one baseline implementation; binding a second one with `@Injector.implements` raises
+`InterfaceAlreadyBoundError`. To replace the baseline (e.g. in tests or plugins) use
+`@Injector.override(Interface)`, which has the same requirements as `@Injector.implements`. The override takes
+precedence over the baseline and may be declared before or after it, so module import order doesn't matter.
+An interface may be overridden only once: a second, different override raises `InterfaceAlreadyBoundError`.
+The baseline remains injectable directly as `Provide[Baseline]`.
+
+`@Injector.override` accepts an optional predicate `on`, which makes the override conditional:
+```python
+import os
+
+@Injector.override(Bowl, on=lambda: os.environ.get("CAT_DIET") == "milk")
+@Injector.singleton
+class MilkBowl(Bowl):
+    def fill(self) -> str:
+        return "Milk!"
+```
+`on` is called once, when the decorator is applied, not when the interface is injected. If it returns false the
+override is skipped: the class stays a regular singleton, the interface keeps its baseline and the override slot
+remains free for another `@Injector.override`. `on` must be callable, so `on=False` raises `TypeError`.
+
+Once an interface is injected for the first time its implementation is frozen, because functions which were
+already decorated hold it. After that, any binding that would change which implementation the interface
+resolves to (e.g. an override of an already injected baseline) raises `InterfaceFrozenError`.
 
 > [!NOTE]
 > `Injector.singletons_available` is deprecated since 0.3.0 and emits `DeprecationWarning`.
