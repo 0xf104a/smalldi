@@ -1,5 +1,5 @@
 import threading
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import pytest
 
@@ -26,22 +26,6 @@ class Unrelated:
     pass
 
 
-class Interface(ABC):
-    @abstractmethod
-    def run(self):
-        pass
-
-
-class Implementation(Interface):
-    def run(self):
-        pass
-
-
-class OtherImplementation(Interface):
-    def run(self):
-        pass
-
-
 # --- instances
 
 
@@ -60,6 +44,27 @@ def test_instance_is_created_lazily_and_once():
     assert singleton.get_instance() is instance
     assert created == [instance]
     assert singleton.frozen
+
+
+def test_factory_replaces_class_construction():
+    calls = []
+
+    def factory():
+        calls.append(1)
+        return "built"
+
+    singleton = LazySingleton(Base, factory=factory)
+    assert singleton.get_instance() == "built"
+    assert singleton.get_instance() == "built"
+    assert calls == [1]
+    assert singleton.cls is Base
+
+
+def test_factory_is_skipped_when_overridden():
+    singleton = LazySingleton(Base, factory=lambda: pytest.fail("factory must not run"))
+    child = LazySingleton(Child)
+    singleton.override(child)
+    assert singleton.get_instance() is child.get_instance()
 
 
 def test_failed_construction_still_freezes():
@@ -263,121 +268,3 @@ def test_override_cycle_is_rejected():
     a.override(b)
     with pytest.raises(TypeError, match="cycle"):
         b.override(a)
-
-
-# --- interfaces
-
-
-def test_interface_without_binding_is_not_resolvable():
-    interface = LazySingleton(Interface)
-    assert not interface.resolvable
-    with pytest.raises(NotImplementedError):
-        interface.get_instance()
-    # A failed lookup doesn't freeze the interface
-    assert not interface.frozen
-
-
-def test_interface_resolves_to_implementation():
-    interface = LazySingleton(Interface)
-    implementation = LazySingleton(Implementation)
-    interface.implement(implementation)
-
-    assert interface.resolvable
-    assert interface.implementation is implementation
-    assert interface.get_instance() is implementation.get_instance()
-
-
-def test_resolving_interface_freezes_interface_and_implementation():
-    interface, implementation = LazySingleton(Interface), LazySingleton(Implementation)
-    interface.implement(implementation)
-    interface.get_instance()
-    assert interface.frozen
-    assert implementation.frozen
-
-
-def test_resolving_implementation_doesnt_freeze_interface():
-    interface, implementation = LazySingleton(Interface), LazySingleton(Implementation)
-    interface.implement(implementation)
-    implementation.get_instance()
-    assert not interface.frozen
-    interface.override(LazySingleton(OtherImplementation))
-
-
-def test_override_wins_over_implementation_in_any_order():
-    for override_first in (True, False):
-        interface = LazySingleton(Interface)
-        implementation, override = LazySingleton(Implementation), LazySingleton(OtherImplementation)
-        if override_first:
-            interface.override(override)
-            interface.implement(implementation)
-        else:
-            interface.implement(implementation)
-            interface.override(override)
-        assert interface.get_instance() is override.get_instance()
-        assert interface.implementation is implementation
-
-
-def test_interface_follows_overridden_implementation():
-    class FakeImplementation(Implementation):
-        pass
-
-    interface, implementation = LazySingleton(Interface), LazySingleton(Implementation)
-    fake = LazySingleton(FakeImplementation)
-    interface.implement(implementation)
-    implementation.override(fake)
-    assert interface.get_instance() is fake.get_instance()
-
-
-def test_implement_requires_interface():
-    with pytest.raises(TypeError, match="not an interface"):
-        LazySingleton(Base).implement(LazySingleton(Child))
-
-
-def test_implement_must_be_subclass():
-    with pytest.raises(TypeError, match="not a subclass"):
-        LazySingleton(Interface).implement(LazySingleton(Base))
-
-
-def test_second_implementation_is_rejected():
-    interface = LazySingleton(Interface)
-    interface.implement(LazySingleton(Implementation))
-    with pytest.raises(TypeError, match="already implemented"):
-        interface.implement(LazySingleton(OtherImplementation))
-
-
-def test_repeating_current_implementation_is_noop():
-    interface = LazySingleton(Interface)
-    implementation = LazySingleton(Implementation)
-    interface.implement(implementation)
-    interface.implement(implementation)
-    assert interface.implementation is implementation
-
-
-def test_implement_with_another_singleton_of_same_class_is_rejected():
-    interface = LazySingleton(Interface)
-    interface.implement(LazySingleton(Implementation))
-    with pytest.raises(TypeError, match="already implemented"):
-        interface.implement(LazySingleton(Implementation))
-
-
-def test_frozen_implementation_cannot_be_changed():
-    interface = LazySingleton(Interface)
-    implementation = LazySingleton(Implementation)
-    interface.implement(implementation)
-    interface.get_instance()
-    # Repeating is fine, changing is not, whatever the class
-    interface.implement(implementation)
-    with pytest.raises(SingletonFrozenError):
-        interface.implement(LazySingleton(Implementation))
-    with pytest.raises(SingletonFrozenError):
-        interface.implement(LazySingleton(OtherImplementation))
-
-
-def test_frozen_overridden_interface_accepts_first_implementation():
-    """Override module imported first, injected, then the implementation module arrives"""
-    interface = LazySingleton(Interface)
-    override = LazySingleton(OtherImplementation)
-    interface.override(override)
-    first = interface.get_instance()
-    interface.implement(LazySingleton(Implementation))
-    assert interface.get_instance() is first

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import pytest
 
 from smalldi import Injector, Provide
-from smalldi._interfaces import InterfaceResolver
+from smalldi._interfaces import InterfaceResolver, LazyInterfaceImpl
 from smalldi._singleton import LazySingleton, SingletonFrozenError
 
 
@@ -296,17 +296,18 @@ class TestInterfaceResolver:
         with pytest.raises(TypeError):
             resolver.register(object)
 
-    def test_registered_interface_has_own_singleton(self):
+    def test_registered_interface_has_own_binding(self):
         resolver = InterfaceResolver()
         resolver.register(_AbstractA)
-        singleton = resolver.resolve(_AbstractA)
+        binding = resolver.resolve(_AbstractA)
         assert resolver.is_interface(_AbstractA)
-        assert singleton.cls is _AbstractA
-        assert not singleton.resolvable
+        assert isinstance(binding, LazyInterfaceImpl)
+        assert binding.interface is _AbstractA
+        assert not binding.resolvable
         assert list(resolver.interfaces()) == [_AbstractA]
-        assert list(resolver.singletons()) == [singleton]
+        assert list(resolver.bindings()) == [binding]
         with pytest.raises(NotImplementedError):
-            singleton.get_instance()
+            binding.get_instance()
 
     def test_register_again_drops_bindings(self):
         resolver = InterfaceResolver()
@@ -629,3 +630,138 @@ def test_singleton_frozen_error_is_public():
     import smalldi
     assert smalldi.SingletonFrozenError is SingletonFrozenError
     assert "SingletonFrozenError" in smalldi.__all__
+
+
+class _OtherConcreteA(_AbstractA):
+    def run(self):
+        pass
+
+
+class _FakeConcreteA(_ConcreteA):
+    pass
+
+
+class TestLazyInterfaceImpl:
+    def test_requires_abstract(self):
+        with pytest.raises(TypeError, match="not abstract"):
+            LazyInterfaceImpl(_ConcreteA)
+
+    def test_unbound_is_not_resolvable(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        assert not binding.resolvable
+        with pytest.raises(NotImplementedError):
+            binding.get_instance()
+        # A failed lookup doesn't freeze the binding
+        assert not binding.frozen
+
+    def test_resolves_to_implementation(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        implementation = LazySingleton(_ConcreteA)
+        binding.implement(implementation)
+
+        assert binding.resolvable
+        assert binding.implementation is implementation
+        assert binding.get_instance() is implementation.get_instance()
+
+    def test_resolving_freezes_binding_and_implementation(self):
+        binding, implementation = LazyInterfaceImpl(_AbstractA), LazySingleton(_ConcreteA)
+        binding.implement(implementation)
+        binding.get_instance()
+        assert binding.frozen
+        assert implementation.frozen
+
+    def test_resolving_implementation_doesnt_freeze_binding(self):
+        binding, implementation = LazyInterfaceImpl(_AbstractA), LazySingleton(_ConcreteA)
+        binding.implement(implementation)
+        implementation.get_instance()
+        assert not binding.frozen
+        binding.override(LazySingleton(_OtherConcreteA))
+
+    @pytest.mark.parametrize("override_first", [True, False])
+    def test_override_wins_over_implementation_in_any_order(self, override_first):
+        binding = LazyInterfaceImpl(_AbstractA)
+        implementation, override = LazySingleton(_ConcreteA), LazySingleton(_OtherConcreteA)
+        if override_first:
+            binding.override(override)
+            binding.implement(implementation)
+        else:
+            binding.implement(implementation)
+            binding.override(override)
+        assert binding.get_instance() is override.get_instance()
+        assert binding.implementation is implementation
+        assert binding.override_singleton is override
+
+    def test_follows_overridden_implementation(self):
+        binding, implementation = LazyInterfaceImpl(_AbstractA), LazySingleton(_ConcreteA)
+        fake = LazySingleton(_FakeConcreteA)
+        binding.implement(implementation)
+        implementation.override(fake)
+        assert binding.get_instance() is fake.get_instance()
+
+    def test_implement_must_be_subclass(self):
+        with pytest.raises(TypeError, match="not a subclass"):
+            LazyInterfaceImpl(_AbstractA).implement(LazySingleton(object))
+
+    def test_override_must_be_subclass(self):
+        with pytest.raises(TypeError, match="not a subclass"):
+            LazyInterfaceImpl(_AbstractA).override(LazySingleton(object))
+
+    def test_second_implementation_is_rejected(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        binding.implement(LazySingleton(_ConcreteA))
+        with pytest.raises(TypeError, match="already implemented"):
+            binding.implement(LazySingleton(_OtherConcreteA))
+        with pytest.raises(TypeError, match="already implemented"):
+            binding.implement(LazySingleton(_ConcreteA))
+
+    def test_second_override_is_rejected(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        override = LazySingleton(_ConcreteA)
+        binding.override(override)
+        with pytest.raises(TypeError, match="already overridden"):
+            binding.override(LazySingleton(_OtherConcreteA))
+        assert binding.override_singleton is override
+
+    def test_repeating_current_bindings_is_noop(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        implementation, override = LazySingleton(_ConcreteA), LazySingleton(_OtherConcreteA)
+        binding.implement(implementation)
+        binding.override(override)
+        binding.get_instance()
+        # Allowed even when frozen
+        binding.implement(implementation)
+        binding.override(override)
+        binding.check_implementation(implementation)
+        binding.check_override(override)
+
+    def test_frozen_implementation_cannot_be_changed(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        binding.implement(LazySingleton(_ConcreteA))
+        binding.get_instance()
+        with pytest.raises(SingletonFrozenError):
+            binding.implement(LazySingleton(_ConcreteA))
+        with pytest.raises(SingletonFrozenError):
+            binding.implement(LazySingleton(_OtherConcreteA))
+
+    def test_frozen_cannot_be_overridden(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        binding.implement(LazySingleton(_ConcreteA))
+        binding.get_instance()
+        with pytest.raises(SingletonFrozenError):
+            binding.override(LazySingleton(_OtherConcreteA))
+
+    def test_frozen_overridden_binding_accepts_first_implementation(self):
+        """Override module imported first, injected, then the implementation module arrives"""
+        binding = LazyInterfaceImpl(_AbstractA)
+        binding.override(LazySingleton(_OtherConcreteA))
+        first = binding.get_instance()
+        binding.implement(LazySingleton(_ConcreteA))
+        assert binding.get_instance() is first
+
+    def test_check_methods_change_nothing(self):
+        binding = LazyInterfaceImpl(_AbstractA)
+        binding.check_implementation(LazySingleton(_ConcreteA))
+        binding.check_override(LazySingleton(_OtherConcreteA))
+        assert binding.implementation is None
+        assert binding.override_singleton is None
+        assert not binding.frozen
