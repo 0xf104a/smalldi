@@ -102,15 +102,19 @@ if __name__ == '__main__':
 # Library structure
 ## Injector
 Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
-DI container inside the library. Injector provides two decorators:
+DI container inside the library. Injector provides these decorators:
 * `@Injector.singleton` registers a class whose instance may further be injected in functions
-* `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton.
-  Every `Provide[]` dependency must already be registered when the function is decorated, otherwise `TypeError` is raised.
+* `@Injector.interface` marks a class as an [interface](#interfaces) singletons may implement
+* `@Injector.implements(...)` declares which interfaces a singleton implements
+* `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` (or `Provide[Interface]`) with actual
+  instances of Singleton. Every `Provide[]` dependency must already be registered when the function is decorated,
+  otherwise `TypeError` is raised.
 
 ### Singletons
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
 than annotated with `Provide[]` type. Only singletons may be decorated with `@Injector.singleton`. As a consequence, 
-only singleton classes may be injected at the current state of library development. Abstract classes can't be singletons.
+only singleton classes, and interfaces they implement, may be injected at the current state of library development.
+Abstract classes can't be singletons.
 
 Singletons are lazy: registering a class doesn't instantiate it. The instance is created, exactly once and in a
 thread-safe way, the first time it is needed, that is when an `@Injector.inject`-decorated function is called.
@@ -126,6 +130,43 @@ Reading it creates every singleton that doesn't exist yet, so it freezes the who
 > `importlib.reload`) twice emits a `RuntimeWarning` and replaces the registration. Instances which were
 > already injected aren't replaced, so several instances of a "singleton" may coexist. DI is normally
 > set up once per process; reload modules at your own risk.
+
+### Interfaces
+An interface lets code depend on an abstraction instead of a concrete singleton. Mark the abstraction with
+`@Injector.interface`, then declare the implementing singleton with `@Injector.implements`, applied *above*
+`@Injector.singleton`:
+```python
+from abc import ABC, abstractmethod
+
+from smalldi import Injector, Provide
+
+@Injector.interface
+class Storage(ABC):
+    @abstractmethod
+    def save(self, data: str): ...
+
+@Injector.implements(Storage)
+@Injector.singleton
+class FileStorage(Storage):
+    def save(self, data: str):
+        print(f"Saving {data}")
+
+@Injector.inject
+def main(storage: Provide[Storage]):
+    storage.save("meow")  # FileStorage instance
+```
+Rules:
+* Each interface has at most one implementation; declaring a second one raises `TypeError`. A singleton may implement
+  several interfaces at once: `@Injector.implements(Storage, Cache)`. If any of them can't be bound, none is.
+* The singleton must be a subclass of every interface it implements (virtual subclasses registered with
+  `ABC.register` count).
+* `Provide[Interface]` receives the same instance as `Provide[Implementation]`.
+* A function may be decorated with `@Injector.inject` before the interface is implemented, as long as the interface
+  itself is registered. Calling it while the interface has no implementation raises `NotImplementedError`.
+* A class can't be both an interface and a singleton.
+* Interfaces aren't listed in `Injector.singletons`, only their implementations are.
+* Registering an interface twice emits a `RuntimeWarning`, like singletons do. Registering the same class again drops
+  its implementation, which must then be declared again.
 
 ## Provide
 `Provide[T]` is an annotation for injector telling it that instead of this argument
