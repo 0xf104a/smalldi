@@ -14,8 +14,9 @@ class SingletonFrozenError(Exception):
 
 
 # Guards the bindings (overrides, implementations, frozen flags) of every
-# singleton and interface. Held only briefly, never while an instance is being
-# created, so constructors may freely use the injector.
+# singleton and interface; `Injector` uses it for its registry too. Held only
+# briefly, never while an instance is being created, so constructors may
+# freely use the injector.
 _bindings_lock = threading.RLock()
 
 

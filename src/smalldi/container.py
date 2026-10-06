@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from smalldi import Injector
 
+
 @dataclasses.dataclass
 class ComponentRegistration:
     """

@@ -1,5 +1,4 @@
 import functools
-import threading
 import warnings
 from inspect import isabstract
 from types import MappingProxyType
@@ -7,9 +6,9 @@ from typing import Any, Mapping
 
 from smalldi._interfaces import InterfaceResolver, LazyInterfaceImpl
 from smalldi._singleton import LazySingleton, SingletonFrozenError, atomic
+from smalldi.annotation import _Provide, Provide
 from smalldi.concurrency import threadsafe
 from smalldi.wrappers import staticclass
-from smalldi.annotation import _Provide, Provide
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
@@ -34,7 +33,7 @@ class _InjectorMeta(type):
     `Injector` is a static class and is never instantiated.
     """
     @property
-    def singletons(cls) -> Mapping[type, Any]:
+    def _singletons(cls) -> Mapping[type, Any]:
         """
         Read-only snapshot of all registered singletons and their instances.
 
@@ -80,7 +79,7 @@ class _InjectorMeta(type):
             DeprecationWarning,
             stacklevel=2,
         )
-        return cls.singletons
+        return cls._singletons
 
 
 @staticclass
@@ -103,14 +102,18 @@ class Injector(metaclass=_InjectorMeta):
     override, an implementation) and whether they are frozen; the injector
     only looks them up and binds them.
 
-    Registration and lookups are guarded by a reentrant lock, so the injector
-    may be used from several threads. Singletons are instantiated lazily, at
-    most once each.
+    Registration, lookups and bindings are guarded by one reentrant lock,
+    never held while an instance is being created, so the injector may be
+    used from several threads and constructors may use the injector.
+    Singletons are instantiated lazily, at most once each.
     """
-    # Not threadsafe on their own: access only while holding _registry_lock
+    # Not threadsafe on their own: access only while holding _registry_lock.
+    # This is the same lock that guards the bindings of every LazySingleton and
+    # LazyInterfaceImpl, so looking a singleton up and binding it is one step.
+    # It is reentrant and never held while an instance is being created.
     _singletons_available: dict[type, LazySingleton] = dict()
     _interface_resolver = InterfaceResolver()
-    _registry_lock = threading.RLock()
+    _registry_lock = atomic()
 
     @classmethod
     def _lookup(cls, tp: type) -> LazySingleton | LazyInterfaceImpl:
@@ -286,7 +289,7 @@ class Injector(metaclass=_InjectorMeta):
             raise TypeError("@Injector.implements requires at least one interface")
 
         def decorator(target_cls):
-            with cls._registry_lock, atomic():
+            with cls._registry_lock:
                 singleton = cls._check_binding("implements", target_cls, interfaces)
                 bound = [cls._interface_resolver.resolve(interface) for interface in interfaces]
                 for interface in bound:
@@ -354,7 +357,7 @@ class Injector(metaclass=_InjectorMeta):
             raise TypeError("@Injector.override requires at least one interface or singleton")
 
         def decorator(target_cls):
-            with cls._registry_lock, atomic():
+            with cls._registry_lock:
                 singleton = cls._check_binding("override", target_cls, targets, allow_singletons=True)
                 overridden = [cls._lookup(target) for target in targets]
                 for target in overridden:
