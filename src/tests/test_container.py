@@ -1,6 +1,9 @@
+import threading
+
 import pytest
 
 from smalldi import Injector, _Provide, Provide
+from smalldi import container as container_module
 from smalldi.container import Container, ComponentRegistration
 
 
@@ -135,36 +138,33 @@ def test_component_injection(reset_injector):
     assert MyComponent().value == 42
 
 
-def test_components_registered_on_overridden_container(reset_injector):
+def test_container_inherits_components_of_base_container(reset_injector):
     calls = []
 
     @Injector.singleton
-    class MyContainer(Container):
+    class BaseContainer(Container):
         pass
 
-    @MyContainer.component()
-    def before_override():
+    @BaseContainer.component()
+    def before():
         return None
 
-    @Injector.override(MyContainer)
     @Injector.singleton
-    class TestContainer(MyContainer):
+    class ChildContainer(BaseContainer):
         def _on_component_register(self, registration: ComponentRegistration):
             calls.append(registration.component)
 
-    @MyContainer.component()
-    def after_override():
+    @BaseContainer.component()
+    def after():
         return None
 
     @Injector.inject
-    def fn(container: Provide[MyContainer]):
+    def fn(container: Provide[ChildContainer]):
         return container
 
     container = fn()
-    assert type(container) is TestContainer
-    assert list(container._get_components()) == [before_override, after_override]
-    # The hook is called once per registration, even though two singletons resolve to the container
-    assert calls == [before_override, after_override]
+    assert list(container._get_components()) == [before, after]
+    assert calls == [before, after]
 
 
 def test_container_is_not_created_by_registration(reset_injector):
@@ -181,3 +181,53 @@ def test_container_is_not_created_by_registration(reset_injector):
         return None
 
     assert created == 0
+
+
+def test_reset_injector_resets_container_state(reset_injector):
+    # Earlier tests in this module registered components and created containers
+    assert container_module._registrations == []
+    assert container_module._instances == []
+
+
+def test_component_hook_resolving_singleton_does_not_deadlock(reset_injector):
+    # Thread A creates Service, whose constructor registers a component; meanwhile thread B registers
+    # a component whose hook resolves Service. Library locks must not be held while running the hook
+    service_creating = threading.Event()
+    hook_running = threading.Event()
+
+    @Injector.singleton
+    class MyContainer(Container):
+        def _on_component_register(self, registration: ComponentRegistration):
+            if registration.args == ("resolve",):
+                hook_running.set()
+                get_service()
+
+    class Service:
+        def __init__(self):
+            service_creating.set()
+            hook_running.wait(timeout=5)
+            MyContainer.component()(lambda: None)
+
+    Injector.singleton(Service)
+
+    @Injector.inject
+    def get_service(service: Provide[Service]):
+        return service
+
+    @Injector.inject
+    def get_container(container: Provide[MyContainer]):
+        return container
+
+    get_container()
+
+    def register_resolving():
+        service_creating.wait(timeout=5)
+        MyContainer.component("resolve")(lambda: None)
+
+    threads = [threading.Thread(target=get_service, daemon=True),
+               threading.Thread(target=register_resolving, daemon=True)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    assert not any(t.is_alive() for t in threads), "threads deadlocked"

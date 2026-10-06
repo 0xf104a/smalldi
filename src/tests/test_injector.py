@@ -1,9 +1,8 @@
 import threading
-from abc import ABC, abstractmethod
 
 import pytest
 
-from smalldi import Injector, Provide, InterfaceAlreadyBoundError, SingletonFrozenError
+from smalldi import Injector, Provide
 from smalldi.annotation import _Provide
 
 
@@ -84,206 +83,6 @@ def test_inject_multiple_dependencies(reset_injector):
     assert result == "AB"
 
 
-def test_override_singleton(reset_injector):
-    @Injector.singleton
-    class Base:
-        def value(self):
-            return "base"
-
-    @Injector.override(Base)
-    @Injector.singleton
-    class Override(Base):
-        def value(self):
-            return "override"
-
-    @Injector.inject
-    def fn(base: Provide[Base], override: Provide[Override]):
-        return base, override
-
-    base, override = fn()
-    assert base is override
-    assert base.value() == "override"
-
-
-def test_override_singleton_skipped_when_predicate_false(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    @Injector.override(Base, on=lambda: False)
-    @Injector.singleton
-    class Override(Base):
-        pass
-
-    @Injector.inject
-    def fn(base: Provide[Base]):
-        return base
-
-    assert type(fn()) is Base
-
-
-def test_override_singleton_requires_subclass(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    with pytest.raises(TypeError, match="does not implement"):
-        @Injector.override(Base)
-        @Injector.singleton
-        class Unrelated:
-            pass
-
-
-def test_override_singleton_requires_singleton(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    with pytest.raises(TypeError, match="must be a singleton"):
-        @Injector.override(Base)
-        class Override(Base):
-            pass
-
-
-def test_override_singleton_twice_raises_already_bound(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    @Injector.override(Base)
-    @Injector.singleton
-    class First(Base):
-        pass
-
-    with pytest.raises(InterfaceAlreadyBoundError) as exc_info:
-        @Injector.override(Base)
-        @Injector.singleton
-        class Second(Base):
-            pass
-    assert exc_info.value.bound_target is First
-
-
-def test_override_singleton_after_injection_raises_frozen(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    @Injector.inject
-    def fn(base: Provide[Base]):
-        return base
-
-    fn()
-    with pytest.raises(SingletonFrozenError) as exc_info:
-        @Injector.override(Base)
-        @Injector.singleton
-        class Override(Base):
-            pass
-    assert exc_info.value.singleton_cls is Base
-    # Failed override doesn't change what was injected
-    assert type(fn()) is Base
-
-
-def test_override_singleton_chain(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    @Injector.override(Base)
-    @Injector.singleton
-    class Middle(Base):
-        pass
-
-    @Injector.override(Middle)
-    @Injector.singleton
-    class Leaf(Middle):
-        pass
-
-    @Injector.inject
-    def fn(base: Provide[Base]):
-        return base
-
-    assert type(fn()) is Leaf
-    # Every singleton on the chain is frozen
-    with pytest.raises(SingletonFrozenError):
-        @Injector.override(Leaf)
-        @Injector.singleton
-        class AfterLeaf(Leaf):
-            pass
-
-
-class _Bowl(ABC):
-    @abstractmethod
-    def fill(self) -> str:
-        pass
-
-
-def test_override_singleton_overrides_interface_baseline(reset_injector):
-    @Injector.implements(_Bowl)
-    @Injector.singleton
-    class FishBowl(_Bowl):
-        def fill(self):
-            return "fish"
-
-    @Injector.override(FishBowl)
-    @Injector.singleton
-    class MilkBowl(FishBowl):
-        def fill(self):
-            return "milk"
-
-    @Injector.inject
-    def fn(bowl: Provide[_Bowl], fish: Provide[FishBowl]):
-        return bowl.fill(), fish.fill()
-
-    assert fn() == ("milk", "milk")
-
-
-def test_override_singleton_overrides_interface_override(reset_injector):
-    @Injector.implements(_Bowl)
-    @Injector.singleton
-    class FishBowl(_Bowl):
-        def fill(self):
-            return "fish"
-
-    @Injector.override(_Bowl)
-    @Injector.singleton
-    class MilkBowl(_Bowl):
-        def fill(self):
-            return "milk"
-
-    @Injector.override(MilkBowl)
-    @Injector.singleton
-    class CreamBowl(MilkBowl):
-        def fill(self):
-            return "cream"
-
-    @Injector.inject
-    def fn(bowl: Provide[_Bowl]):
-        return bowl.fill()
-
-    assert fn() == "cream"
-
-
-def test_override_singleton_after_interface_injection_raises_frozen(reset_injector):
-    @Injector.implements(_Bowl)
-    @Injector.singleton
-    class FishBowl(_Bowl):
-        def fill(self):
-            return "fish"
-
-    @Injector.inject
-    def fn(bowl: Provide[_Bowl]):
-        return bowl.fill()
-
-    assert fn() == "fish"
-    with pytest.raises(SingletonFrozenError):
-        @Injector.override(FishBowl)
-        @Injector.singleton
-        class MilkBowl(FishBowl):
-            def fill(self):
-                return "milk"
-    assert fn() == "fish"
-
-
 def test_singleton_registered_after_inject(reset_injector):
     class Service:
         pass
@@ -295,44 +94,6 @@ def test_singleton_registered_after_inject(reset_injector):
     # Resolution happens on call, so registration order doesn't matter
     Injector.singleton(Service)
     assert isinstance(fn(), Service)
-
-
-def test_override_singleton_after_inject_before_call(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    @Injector.inject
-    def fn(base: Provide[Base]):
-        return base
-
-    @Injector.override(Base)
-    @Injector.singleton
-    class Override(Base):
-        pass
-
-    assert type(fn()) is Override
-
-
-def test_overridden_singleton_is_never_created(reset_injector):
-    created = []
-
-    @Injector.singleton
-    class Base:
-        def __init__(self):
-            created.append(type(self))
-
-    @Injector.override(Base)
-    @Injector.singleton
-    class Override(Base):
-        pass
-
-    @Injector.inject
-    def fn(base: Provide[Base]):
-        return base
-
-    fn()
-    assert created == [Override]
 
 
 def test_unavailable_singleton_raises_on_call(reset_injector):
@@ -423,3 +184,66 @@ def test_concurrent_injection_creates_single_instance(reset_injector):
         t.join()
     assert created == 1
     assert all(r is results[0] for r in results)
+
+
+def test_cross_thread_circular_dependency_raises(reset_injector):
+    # Each constructor waits until both threads are inside a constructor (or the barrier times out),
+    # then resolves the other singleton
+    barrier = threading.Barrier(2)
+
+    def sync():
+        try:
+            barrier.wait(timeout=0.5)
+        except threading.BrokenBarrierError:
+            pass
+
+    class First:
+        def __init__(self):
+            sync()
+            get_second()
+
+    class Second:
+        def __init__(self):
+            sync()
+            get_first()
+
+    Injector.singleton(First)
+    Injector.singleton(Second)
+
+    @Injector.inject
+    def get_first(first: Provide[First]):
+        return first
+
+    @Injector.inject
+    def get_second(second: Provide[Second]):
+        return second
+
+    errors = []
+
+    def work(fn):
+        try:
+            fn()
+        except TypeError as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=work, args=(fn,), daemon=True) for fn in (get_first, get_second)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    assert not any(t.is_alive() for t in threads), "threads deadlocked"
+    assert len(errors) == 2
+    assert all("Circular dependency" in str(e) for e in errors)
+
+
+def test_singleton_does_not_mutate_class(reset_injector):
+    @Injector.singleton
+    class Service:
+        pass
+
+    @Injector.inject
+    def fn(service: Provide[Service]):
+        return service
+
+    fn()
+    assert "__singleton__" not in vars(Service)

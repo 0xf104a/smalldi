@@ -38,7 +38,11 @@ def threadsafe_cls(cls):
     methods inherited from base classes are not wrapped unless the base is threadsafe itself.
     :param cls: class to make threadsafe
     :return: the same class with methods wrapped
+    :raises TypeError: if instances of the class have no __dict__ (all of its __slots__ lack it)
     """
+    if not cls.__dictoffset__:
+        raise TypeError(f"{cls!r} defines __slots__ without __dict__; "
+                        f"add '__dict__' to __slots__ to make it threadsafe")
     for name, attr in list(vars(cls).items()):
         if name.startswith("__") and name.endswith("__"):
             continue

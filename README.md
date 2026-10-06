@@ -140,55 +140,33 @@ if __name__ == '__main__':
 ## Injector
 Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
 DI container inside the library. Injector provides four decorators:
-* `@Injector.singleton` creates an instance of a class which may further be injected in functions
+* `@Injector.singleton` registers a class whose single instance may further be injected in functions
 * `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton
 * `@Injector.implements(Interface)` binds a singleton to an interface, so `Provide[Interface]` injects it
-* `@Injector.override(Interface)` replaces the implementation bound with `@Injector.implements`;
-  `@Injector.override(Singleton)` replaces a singleton with its subclass
+* `@Injector.override(Interface)` replaces the implementation bound with `@Injector.implements`
 
 Dependencies are resolved when the decorated function is first called, not when `@Injector.inject` is applied,
 so singletons, interfaces and overrides may be declared in any order, as long as they are declared before the
 first call. A missing dependency raises `TypeError` on call. Dependencies passed explicitly by the caller
-are not resolved.
+are not resolved. Note that this also means that whether a late binding fails with `InterfaceFrozenError` depends
+on whether a function injecting the interface was already called.
 
 ### Singletons
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
 than annotated with `Provide[]` type. Only singletons may be decorated with `@Injector.singleton`. As a consequence, 
 only singleton classes (or interfaces bound to them) may be injected at the current state of library development.
 Singletons are lazy: the instance is created when the singleton is first injected, so `__init__` side effects
-happen then, not when the class is declared. A singleton is never created if it is overridden or never injected.
-Creation is thread-safe, and a circular dependency between singletons raises `TypeError`.
-Decorating a class with `@Injector.singleton` twice raises `ValueError`.
-
-A singleton may be replaced with its subclass using `@Injector.override(Singleton)`:
-```python
-@Injector.singleton
-class Database:
-    ...
-
-@Injector.override(Database)
-@Injector.singleton
-class TestDatabase(Database):
-    ...
-
-@Injector.inject
-def query(db: Provide[Database]):  # receives TestDatabase instance
-    ...
-```
-The override must be a singleton subclassing the overridden one, and `@Injector.override` goes above
-`@Injector.singleton`. Like an interface, a singleton may be overridden only once (otherwise
-`InterfaceAlreadyBoundError` is raised), and `on` predicate works the same way. Overrides may be chained:
-an override may itself be overridden. If the overridden singleton is bound to an interface (as its baseline or
-override), `Provide[Interface]` receives the override too, as if the interface was overridden with it.
-Once a singleton is injected, directly or through an interface, it is created and frozen; overriding it then
-raises `SingletonFrozenError`. Overriding it before that is fine, even if functions injecting it are already
-declared.
+happen then, not when the class is declared, and errors raised by `__init__` surface on first use.
+A singleton is never created if it is never injected. Creation is thread-safe (singletons are created under a
+single lock), and a circular dependency between singletons raises `TypeError`, also when threads race on it.
+Decorating a class with `@Injector.singleton` twice raises `ValueError`. A class used as an interface can't be a
+singleton and vice versa: either order raises `TypeError`.
 
 ### Interfaces
 `@Injector.implements(Interface)` binds a singleton class to an interface (usually an abstract class), so
 parameters annotated with `Provide[Interface]` receive the instance of that singleton. The decorated class must
 be a concrete subclass of the interface and must already be a singleton, i.e. `@Injector.implements` goes above
-`@Injector.singleton`. The class is still injectable directly as `Provide[Implementation]`.
+`@Injector.singleton`. The interface itself must not be a singleton. The class is still injectable directly as `Provide[Implementation]`.
 
 Each interface has exactly one baseline implementation; binding a second one with `@Injector.implements` raises
 `InterfaceAlreadyBoundError`. To replace the baseline (e.g. in tests or plugins) use
@@ -209,7 +187,8 @@ class MilkBowl(Bowl):
 ```
 `on` is called once, when the decorator is applied, not when the interface is injected. If it returns false the
 override is skipped: the class stays a regular singleton, the interface keeps its baseline and the override slot
-remains free for another `@Injector.override`. `on` must be callable, so `on=False` raises `TypeError`.
+remains free for another `@Injector.override`. The override is validated regardless of `on`, so an invalid
+override fails in every environment. `on` must be callable, so `on=False` raises `TypeError`.
 
 Once an interface is injected for the first time its implementation is frozen, because functions which were
 already called hold it. After that, any binding that would change which implementation the interface
@@ -217,7 +196,7 @@ resolves to (e.g. an override of an already injected baseline) raises `Interface
 
 > [!NOTE]
 > `Injector.singletons_available` is deprecated since 0.3.0 and emits `DeprecationWarning`.
-> It returns a snapshot of singleton instances, creating (and freezing) every registered singleton.
+> It returns a read-only snapshot containing only singletons which were already created; it never creates any.
 > Use `@Injector.inject` to obtain singletons instead.
 
 ## Provide
@@ -231,9 +210,8 @@ All containers must be singletons inherited from `Container` class.
 To create a container, write and inheritor of `Container` class and annotate it with `@Injector.singleton`.
 Then you may register components in the container by annotating them with `@MyContainer.component`.
 Additionally, `@MyContainer.component` may be called with `()` in order to provide metadata about the component.
-Registering a component doesn't create the container, so the container may still be overridden with
-its subclass. Components belong to the container class, so a container also has components registered
-in the container classes it inherits from (including the one it overrides).
+Registering a component doesn't create the container. Components belong to the container class, so a container
+also has components registered in the container classes it inherits from.
 
 ## `Container._get_components`
 The container exposes protected method `_get_components` which returns an iterable of all components
@@ -243,7 +221,8 @@ registered in the container (the decorated classes or functions themselves). Ful
 ## `Container._on_component_register`
 The container has protected method `_on_component_register(registration)` which is called with the
 [registration](#componentregistration) every time a new component is registered in the container.
-Components registered before the container is created are passed to it right after creation.
+Components registered before the container is created are passed to it right after creation. The hook is
+called without holding the container's lock, so it may register components and inject singletons.
 
 ## ComponentRegistration
 `ComponentRegistration` is a dataclass which holds information about registered component which

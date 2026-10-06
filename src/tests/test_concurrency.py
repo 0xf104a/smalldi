@@ -1,7 +1,10 @@
+import importlib.util
 import threading
 import time
 
-from smalldi.threading import threadsafe, threadsafe_cls, threadsafe_fn
+import pytest
+
+from smalldi.concurrency import threadsafe, threadsafe_cls, threadsafe_fn
 
 
 def _run_concurrently(target, n=8):
@@ -165,3 +168,31 @@ def test_threadsafe_dispatches_on_type():
 
     assert Service().method()
     assert fn() == "fn"
+
+
+def test_threadsafe_cls_rejects_slots_without_dict():
+    with pytest.raises(TypeError, match="__slots__"):
+        @threadsafe_cls
+        class Slotted:
+            __slots__ = ("value",)
+
+            def get(self):
+                return self.value
+
+
+def test_threadsafe_cls_accepts_slots_with_dict():
+    @threadsafe_cls
+    class Slotted:
+        __slots__ = ("value", "__dict__")
+
+        def __init__(self):
+            self.value = 1
+
+        def get(self):
+            return self.value
+
+    assert Slotted().get() == 1
+
+
+def test_module_does_not_shadow_stdlib_name():
+    assert importlib.util.find_spec("smalldi.threading") is None
