@@ -195,12 +195,22 @@ def test_second_override_is_rejected():
     assert base.override_singleton is child
 
 
-def test_override_with_same_class_rebinds():
+def test_repeating_current_override_is_noop():
     base = LazySingleton(Base)
-    base.override(LazySingleton(Child))
-    fresh = LazySingleton(Child)
-    base.override(fresh)
-    assert base.override_singleton is fresh
+    child = LazySingleton(Child)
+    base.override(child)
+    base.override(child)
+    assert base.override_singleton is child
+
+
+def test_override_with_another_singleton_of_same_class_is_rejected():
+    """Only identity counts: a second wrapper of the same class is another override"""
+    base = LazySingleton(Base)
+    child = LazySingleton(Child)
+    base.override(child)
+    with pytest.raises(TypeError, match="already overridden"):
+        base.override(LazySingleton(Child))
+    assert base.override_singleton is child
 
 
 def test_override_after_get_instance_is_rejected():
@@ -210,14 +220,21 @@ def test_override_after_get_instance_is_rejected():
         base.override(LazySingleton(Child))
 
 
-def test_same_class_override_is_allowed_after_freeze():
-    """A reloaded override may rebind even after the singleton was injected"""
+def test_repeating_current_override_is_allowed_after_freeze():
+    base = LazySingleton(Base)
+    child = LazySingleton(Child)
+    base.override(child)
+    base.get_instance()
+    base.override(child)
+    assert base.override_singleton is child
+
+
+def test_frozen_override_cannot_be_rebound_even_to_same_class():
     base = LazySingleton(Base)
     base.override(LazySingleton(Child))
     base.get_instance()
-    fresh = LazySingleton(Child)
-    base.override(fresh)
-    assert base.override_singleton is fresh
+    with pytest.raises(SingletonFrozenError):
+        base.override(LazySingleton(Child))
 
 
 def test_check_override_changes_nothing():
@@ -328,33 +345,39 @@ def test_second_implementation_is_rejected():
         interface.implement(LazySingleton(OtherImplementation))
 
 
-def test_implement_with_same_class_rebinds():
+def test_repeating_current_implementation_is_noop():
+    interface = LazySingleton(Interface)
+    implementation = LazySingleton(Implementation)
+    interface.implement(implementation)
+    interface.implement(implementation)
+    assert interface.implementation is implementation
+
+
+def test_implement_with_another_singleton_of_same_class_is_rejected():
     interface = LazySingleton(Interface)
     interface.implement(LazySingleton(Implementation))
-    fresh = LazySingleton(Implementation)
-    interface.implement(fresh)
-    assert interface.implementation is fresh
+    with pytest.raises(TypeError, match="already implemented"):
+        interface.implement(LazySingleton(Implementation))
 
 
-# --- re-registration helpers
+def test_frozen_implementation_cannot_be_changed():
+    interface = LazySingleton(Interface)
+    implementation = LazySingleton(Implementation)
+    interface.implement(implementation)
+    interface.get_instance()
+    # Repeating is fine, changing is not, whatever the class
+    interface.implement(implementation)
+    with pytest.raises(SingletonFrozenError):
+        interface.implement(LazySingleton(Implementation))
+    with pytest.raises(SingletonFrozenError):
+        interface.implement(LazySingleton(OtherImplementation))
 
 
-def test_retarget_replaces_references():
-    interface, base = LazySingleton(Interface), LazySingleton(Base)
-    old_impl, new_impl = LazySingleton(Implementation), LazySingleton(Implementation)
-    old_child, new_child = LazySingleton(Child), LazySingleton(Child)
-    interface.implement(old_impl)
-    base.override(old_child)
-
-    interface.retarget(old_impl, new_impl)
-    base.retarget(old_child, new_child)
-    assert interface.implementation is new_impl
-    assert base.override_singleton is new_child
-
-
-def test_inherit_override():
-    old, new = LazySingleton(Base), LazySingleton(Base)
-    child = LazySingleton(Child)
-    old.override(child)
-    new.inherit_override(old)
-    assert new.override_singleton is child
+def test_frozen_overridden_interface_accepts_first_implementation():
+    """Override module imported first, injected, then the implementation module arrives"""
+    interface = LazySingleton(Interface)
+    override = LazySingleton(OtherImplementation)
+    interface.override(override)
+    first = interface.get_instance()
+    interface.implement(LazySingleton(Implementation))
+    assert interface.get_instance() is first

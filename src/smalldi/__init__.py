@@ -6,7 +6,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from smalldi._interfaces import InterfaceResolver
-from smalldi._singleton import LazySingleton, SingletonFrozenError, _same_class
+from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.concurrency import threadsafe
 from smalldi.wrappers import staticclass
 from smalldi.annotation import _Provide, Provide
@@ -15,6 +15,17 @@ __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
 __version__ = "0.3.0"
 __all__ = ["Injector", "Provide", "SingletonFrozenError"]
+
+def _same_class(a: type, b: type) -> bool:
+    """
+    Whether two classes are the same class, or a reloaded version of it.
+
+    :param a: first class
+    :param b: second class
+    :return: True if the classes are identical or share module and qualified name
+    """
+    return a is b or (a.__module__, a.__qualname__) == (b.__module__, b.__qualname__)
+
 
 class _InjectorMeta(type):
     """
@@ -188,16 +199,15 @@ class Injector(metaclass=_InjectorMeta):
         the singleton is frozen and can't be overridden, even if creating the
         instance failed.
 
-        Registering the same class, or a class with the same module and
-        qualified name (as happens after `importlib.reload`), more than once
-        emits a `RuntimeWarning` and replaces the registration. Instances which
-        were already injected aren't replaced, so several instances may coexist.
-        Registering the same class object again keeps its override, and
-        interfaces and singletons bound to it use the new registration.
+        A class can be registered only once. Registering it again, or
+        registering a class with the same module and qualified name (as happens
+        after `importlib.reload`), raises `TypeError`: the injector is set up
+        once per process.
 
         :param target_cls: Class which to be marked as injectable singleton
         :return: `target_cls` unchanged, so this may be used as a decorator
-        :raises TypeError: if `target_cls` is abstract or is an interface
+        :raises TypeError: if `target_cls` is abstract, is an interface, or is
+            already registered (possibly as a reloaded class)
         """
         if isabstract(target_cls):
             raise TypeError(f"Class {target_cls} is abstract and cannot be a singleton")
@@ -205,21 +215,10 @@ class Injector(metaclass=_InjectorMeta):
             if cls._interface_resolver.is_interface(target_cls):
                 raise TypeError(f"Class {target_cls} is an interface and cannot be a singleton")
             if any(_same_class(tp, target_cls) for tp in cls._singletons_available):
-                warnings.warn(
-                    f"Class {target_cls} is registered as a singleton more than once "
-                    f"(module reload?). Already injected instances are not replaced, "
-                    f"so several instances may coexist.",
-                    RuntimeWarning,
-                    stacklevel=2,
+                raise TypeError(
+                    f"Class {target_cls} is already registered as a singleton (module reload?)"
                 )
-            new = LazySingleton(target_cls)
-            old = cls._singletons_available.get(target_cls)
-            if old is not None:
-                with LazySingleton.atomic():
-                    new.inherit_override(old)
-                    for bound in (*cls._singletons_available.values(), *cls._interface_resolver.singletons()):
-                        bound.retarget(old, new)
-            cls._singletons_available[target_cls] = new
+            cls._singletons_available[target_cls] = LazySingleton(target_cls)
         return target_cls
 
     @classmethod
@@ -232,14 +231,14 @@ class Injector(metaclass=_InjectorMeta):
         overrides them with `@Injector.override`. An interface must be an
         abstract class, so it can't be a singleton itself.
 
-        Registering the same interface, or a class with the same module and
-        qualified name (as happens after `importlib.reload`), more than once
-        emits a `RuntimeWarning`. Registering the same class again drops its
-        implementation and override.
+        An interface can be registered only once. Registering it again, or
+        registering a class with the same module and qualified name (as happens
+        after `importlib.reload`), raises `TypeError`.
 
         :param target_cls: abstract class which to be marked as an interface
         :return: `target_cls` unchanged, so this may be used as a decorator
-        :raises TypeError: if `target_cls` isn't abstract or is a registered singleton
+        :raises TypeError: if `target_cls` isn't abstract, is a registered
+            singleton, or is already registered (possibly as a reloaded class)
         """
         if not isabstract(target_cls):
             raise TypeError(f"Class {target_cls} is not abstract and cannot be an interface")
@@ -247,11 +246,8 @@ class Injector(metaclass=_InjectorMeta):
             if target_cls in cls._singletons_available:
                 raise TypeError(f"Class {target_cls} is a singleton and cannot be an interface")
             if any(_same_class(tp, target_cls) for tp in cls._interface_resolver.interfaces()):
-                warnings.warn(
-                    f"Class {target_cls} is registered as an interface more than once "
-                    f"(module reload?). Its implementation and override must be declared again.",
-                    RuntimeWarning,
-                    stacklevel=2,
+                raise TypeError(
+                    f"Class {target_cls} is already registered as an interface (module reload?)"
                 )
             cls._interface_resolver.register(target_cls)
         return target_cls
@@ -274,8 +270,8 @@ class Injector(metaclass=_InjectorMeta):
         declared first. Every interface must be registered with
         `@Injector.interface` and be a base class of the singleton. Each
         interface has at most one implementation; declaring it again for the
-        same class (or a reloaded version of it) rebinds it. Either all
-        interfaces are bound or, on error, none of them.
+        same class is a no-op. Either all interfaces are bound or, on error,
+        none of them.
 
         :param interfaces: interfaces implemented by the singleton
         :return: decorator binding the interfaces and returning the class unchanged
@@ -330,11 +326,11 @@ class Injector(metaclass=_InjectorMeta):
         `Provide[FakeMailService]` receive the last override's instance.
 
         Each target may have only one override, so it is unambiguous which
-        singleton gets injected; declaring it again for the same class (or a
-        reloaded version of it) rebinds it. A target is frozen once an instance
-        was requested through it, after which it can't be overridden: an
-        interface once `Provide[Interface]` was resolved, a singleton once it was
-        injected directly or through an interface it implements, `Injector.singletons`
+        singleton gets injected; declaring it again for the same class is a
+        no-op. A target is frozen once an instance was requested through it,
+        after which it can't be overridden: an interface once
+        `Provide[Interface]` was resolved, a singleton once it was injected
+        directly or through an interface it implements, `Injector.singletons`
         was read, or a component was registered in it (containers). A target
         is frozen even if creating its instance failed. Declare overrides
         before the first injection.

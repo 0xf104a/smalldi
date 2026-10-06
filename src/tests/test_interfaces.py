@@ -217,7 +217,7 @@ def test_implements_same_class_twice_is_allowed(reset_injector):
     assert isinstance(Injector._get_instance(Storage), MemoryStorage)
 
 
-def test_reloaded_implementation_rebinds(reset_injector):
+def test_reloaded_implementation_cannot_register(reset_injector):
     Storage = make_storage()
 
     def make_impl():
@@ -227,13 +227,9 @@ def test_reloaded_implementation_rebinds(reset_injector):
         return MemoryStorage
 
     first = Injector.implements(Storage)(Injector.singleton(make_impl()))
-    with pytest.warns(RuntimeWarning):
-        second = Injector.singleton(make_impl())
-    Injector.implements(Storage)(second)
-
-    instance = Injector._get_instance(Storage)
-    assert type(instance) is second
-    assert type(instance) is not first
+    with pytest.raises(TypeError, match="already registered"):
+        Injector.singleton(make_impl())
+    assert type(Injector._get_instance(Storage)) is first
 
 
 def test_interface_must_be_abstract(reset_injector):
@@ -261,24 +257,18 @@ def test_singleton_cannot_be_interface(reset_injector):
         Injector.interface(Service)
 
 
-def test_interface_reregistration_warns_and_drops_implementation(reset_injector):
+def test_interface_reregistration_raises_and_keeps_implementation(reset_injector):
     Storage = make_storage()
+    MemoryStorage = make_memory_storage(Storage)
 
-    @Injector.implements(Storage)
-    @Injector.singleton
-    class MemoryStorage(Storage):
-        def name(self):
-            return "memory"
-
-    with pytest.warns(RuntimeWarning):
+    with pytest.raises(TypeError, match="already registered"):
         Injector.interface(Storage)
-    with pytest.raises(NotImplementedError):
-        Injector._get_instance(Storage)
+    assert isinstance(Injector._get_instance(Storage), MemoryStorage)
 
 
-def test_interface_reload_warns(reset_injector):
+def test_interface_reload_raises(reset_injector):
     make_storage()
-    with pytest.warns(RuntimeWarning):
+    with pytest.raises(TypeError, match="already registered"):
         make_storage()
 
 
@@ -401,7 +391,7 @@ def test_override_same_class_twice_is_allowed(reset_injector):
     assert isinstance(Injector._get_instance(Storage), FakeStorage)
 
 
-def test_reloaded_override_rebinds(reset_injector):
+def test_reloaded_override_cannot_register(reset_injector):
     Storage = make_storage()
 
     def make_fake():
@@ -411,12 +401,9 @@ def test_reloaded_override_rebinds(reset_injector):
         return FakeStorage
 
     first = Injector.override(Storage)(Injector.singleton(make_fake()))
-    with pytest.warns(RuntimeWarning):
-        second = Injector.singleton(make_fake())
-    Injector.override(Storage)(second)
-
-    assert type(Injector._get_instance(Storage)) is second
-    assert second is not first
+    with pytest.raises(TypeError, match="already registered"):
+        Injector.singleton(make_fake())
+    assert type(Injector._get_instance(Storage)) is first
 
 
 def test_override_multiple_interfaces(reset_injector):
@@ -627,29 +614,18 @@ def test_second_implementation_raises_despite_override(reset_injector):
                 return "another"
 
 
-def test_interface_reregistration_unfreezes(reset_injector):
+def test_frozen_interface_stays_frozen_on_reregistration_attempt(reset_injector):
     Storage = make_storage()
     make_memory_storage(Storage)
     Injector._get_instance(Storage)
     assert Injector._interface_resolver.resolve(Storage).frozen
 
-    with pytest.warns(RuntimeWarning):
+    with pytest.raises(TypeError):
         Injector.interface(Storage)
-    assert not Injector._interface_resolver.resolve(Storage).frozen
+    assert Injector._interface_resolver.resolve(Storage).frozen
 
 
 def test_singleton_frozen_error_is_public():
     import smalldi
     assert smalldi.SingletonFrozenError is SingletonFrozenError
     assert "SingletonFrozenError" in smalldi.__all__
-
-
-def test_reregistered_implementation_keeps_interface_binding(reset_injector):
-    Storage = make_storage()
-    MemoryStorage = make_memory_storage(Storage)
-
-    with pytest.warns(RuntimeWarning):
-        Injector.singleton(MemoryStorage)
-    fresh = Injector._singletons_available[MemoryStorage]
-    assert Injector._interface_resolver.resolve(Storage).implementation is fresh
-    assert Injector._get_instance(Storage) is fresh.get_instance()

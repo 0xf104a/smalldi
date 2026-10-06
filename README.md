@@ -128,10 +128,9 @@ Reading it creates every singleton that doesn't exist yet, so it freezes the who
 `Injector.singletons_available` is a deprecated alias for it.
 
 > [!WARNING]
-> Registering the same class (or a class with the same module and qualified name, as happens after
-> `importlib.reload`) twice emits a `RuntimeWarning` and replaces the registration. Instances which were
-> already injected aren't replaced, so several instances of a "singleton" may coexist. DI is normally
-> set up once per process; reload modules at your own risk.
+> Every class is registered once. Registering a class twice, or registering a class with the same module and
+> qualified name (as happens after `importlib.reload`), raises `TypeError`. DI is set up once per process;
+> module reloading isn't supported.
 
 ### Interfaces
 An interface lets code depend on an abstraction instead of a concrete singleton. Mark the abstraction with
@@ -169,8 +168,8 @@ Rules:
 * Interfaces must be abstract classes (with at least one abstract method), so a class can't be both an interface and
   a singleton.
 * Interfaces aren't listed in `Injector.singletons`, only their implementations are.
-* Registering an interface twice emits a `RuntimeWarning`, like singletons do. Registering the same class again drops
-  its implementation and override, which must then be declared again.
+* Like singletons, an interface is registered once: registering it again (or a reloaded copy of it) raises
+  `TypeError`. Repeating `@Injector.implements` with the same singleton is a no-op.
 
 ### Overrides
 `@Injector.override` makes another singleton injected instead of an interface's implementation or instead of another
@@ -203,7 +202,7 @@ instance: the same objects `Provide[MemoryStorage]` and `Provide[QuietMeowServic
 * Overrides are followed transitively: if `QuietMeowService` is overridden too, `Provide[MeowService]` receives the
   last override's instance. An interface whose implementation is overridden resolves to that override as well.
 * Each interface or singleton may have only one override, so it is unambiguous what gets injected: a second override
-  with another class raises `TypeError`. Declaring the same class again (e.g. after a reload) is allowed.
+  with another class raises `TypeError`. Repeating the same override is a no-op.
 * Targets are *frozen* once an instance was requested through them, even if creating it failed, and overriding a
   frozen target raises `SingletonFrozenError`:
   * an interface the first time `Provide[Interface]` is resolved, or when `Injector.singletons` is read. Injecting
@@ -211,9 +210,9 @@ instance: the same objects `Provide[MemoryStorage]` and `Provide[QuietMeowServic
   * a singleton once it is injected (directly, through an interface it implements, or through a singleton it
     overrides), when `Injector.singletons` is read, or, for containers, when the first component is registered.
 
-  So declare overrides before anything injects their targets.
-* Registering the same singleton class object again (which emits a `RuntimeWarning`) keeps its override, and
-  interfaces and overrides bound to it switch to the new registration.
+  So declare overrides before anything injects their targets. Frozen means frozen: nothing rebinds a frozen
+  target, the only binding still accepted is the first `@Injector.implements` of an interface that already has an
+  override, since the override keeps winning.
 
 `SingletonFrozenError` can be imported from `smalldi`.
 

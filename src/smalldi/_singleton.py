@@ -15,17 +15,6 @@ class SingletonFrozenError(Exception):
     """
 
 
-def _same_class(a: type, b: type) -> bool:
-    """
-    Whether two classes are the same class, or a reloaded version of it.
-
-    :param a: first class
-    :param b: second class
-    :return: True if the classes are identical or share module and qualified name
-    """
-    return a is b or (a.__module__, a.__qualname__) == (b.__module__, b.__qualname__)
-
-
 class LazySingleton:
     """
     Lazily resolved single instance of a class.
@@ -45,8 +34,10 @@ class LazySingleton:
     instance, and overrides of the delegate are followed transitively.
 
     A `LazySingleton` is frozen once it was asked for an instance, even if
-    creating the instance then failed. A frozen singleton can't be overridden
-    anymore, so every caller keeps receiving the same instance.
+    creating the instance then failed. Bindings of a frozen singleton can't be
+    changed anymore, so every caller keeps receiving the same instance. The
+    only binding allowed after freezing is the first implementation of an
+    overridden interface, since the override keeps winning.
 
     Thread safety: the bindings (override, implementation, frozen flag) of all
     singletons are guarded by one shared lock, held only briefly and never
@@ -142,33 +133,35 @@ class LazySingleton:
         """
         Checks that `override()` would succeed, without changing anything.
 
+        Repeating the current override is a no-op and always passes.
+
         :param override: singleton to inject instead of this one
         :raises TypeError: if `override` is this singleton, its class isn't a
-            subclass of `cls`, a different override is already set, or the
+            subclass of `cls`, another override is already set, or the
             override would form a cycle
-        :raises SingletonFrozenError: if this singleton is frozen and not
-            overridden yet
+        :raises SingletonFrozenError: if this singleton is frozen
         """
         with self._state_lock:
             if override is self or override.cls is self.cls:
                 raise TypeError(f"Class {self.cls} cannot override itself")
             if not issubclass(override.cls, self.cls):
                 raise TypeError(f"Class {override.cls} is not a subclass of {self.cls}")
-            if self._override is not None:
-                if not _same_class(self._override.cls, override.cls):
-                    raise TypeError(f"{self.cls} is already overridden by {self._override.cls}")
-            elif self._frozen:
+            if override is self._override:
+                return
+            if self._frozen:
                 raise SingletonFrozenError(
                     f"{self.cls} was already injected and cannot be overridden"
                 )
+            if self._override is not None:
+                raise TypeError(f"{self.cls} is already overridden by {self._override.cls}")
             if override._delegates_to(self):
                 raise TypeError(f"Overriding {self.cls} with {override.cls} would form a cycle")
 
     def override(self, override: "LazySingleton"):
         """
         Makes `get_instance()` return the instance of `override` instead,
-        taking precedence over any implementation. Overriding again with the
-        same class (or a reloaded version of it) rebinds the override.
+        taking precedence over any implementation. Repeating the current
+        override is a no-op.
 
         :param override: singleton to inject instead of this one
         :raises TypeError: see `check_override`
@@ -182,16 +175,26 @@ class LazySingleton:
         """
         Checks that `implement()` would succeed, without changing anything.
 
+        Repeating the current implementation is a no-op and always passes.
+
         :param implementation: singleton implementing this interface
         :raises TypeError: if `cls` isn't abstract, the implementation's class
-            isn't a subclass of `cls`, or a different implementation is already set
+            isn't a subclass of `cls`, or another implementation is already set
+        :raises SingletonFrozenError: if this interface is frozen and already
+            implemented
         """
         with self._state_lock:
             if not isabstract(self.cls):
                 raise TypeError(f"Class {self.cls} is not an interface")
             if not issubclass(implementation.cls, self.cls):
                 raise TypeError(f"Class {implementation.cls} is not a subclass of {self.cls}")
-            if self._implementation is not None and not _same_class(self._implementation.cls, implementation.cls):
+            if implementation is self._implementation:
+                return
+            if self._implementation is not None:
+                if self._frozen:
+                    raise SingletonFrozenError(
+                        f"Interface {self.cls} was already injected and its implementation cannot be changed"
+                    )
                 raise TypeError(
                     f"Interface {self.cls} is already implemented by {self._implementation.cls}; "
                     f"use @Injector.override to replace it"
@@ -200,42 +203,18 @@ class LazySingleton:
     def implement(self, implementation: "LazySingleton"):
         """
         Makes `get_instance()` of this interface return the instance of
-        `implementation`, unless overridden. Implementing again with the same
-        class (or a reloaded version of it) rebinds the implementation. Allowed
-        after freezing: an override, if any, still wins, and a different
-        implementation is refused anyway.
+        `implementation`, unless overridden. Repeating the current
+        implementation is a no-op. A frozen interface accepts its first
+        implementation, since it is frozen only if it already has an override,
+        which keeps winning.
 
         :param implementation: singleton implementing this interface
         :raises TypeError: see `check_implementation`
+        :raises SingletonFrozenError: see `check_implementation`
         """
         with self._state_lock:
             self.check_implementation(implementation)
             self._implementation = implementation
-
-    def retarget(self, old: "LazySingleton", new: "LazySingleton"):
-        """
-        Replaces references to `old` with `new` in the override and
-        implementation of this singleton, bypassing all checks. Used when a
-        singleton is registered again, so bindings follow the new registration.
-
-        :param old: replaced singleton
-        :param new: singleton replacing it
-        """
-        with self._state_lock:
-            if self._override is old:
-                self._override = new
-            if self._implementation is old:
-                self._implementation = new
-
-    def inherit_override(self, old: "LazySingleton"):
-        """
-        Takes over the override of `old`, bypassing all checks. Used when a
-        singleton is registered again, so it stays overridden.
-
-        :param old: previous registration of the same class
-        """
-        with self._state_lock:
-            self._override = old._override
 
     def _delegates_to(self, target: "LazySingleton") -> bool:
         """

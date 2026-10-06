@@ -73,25 +73,27 @@ def test_singleton_single_instance(reset_injector):
     assert counter == 1
 
 
-def test_singleton_reregistration_warns(reset_injector):
+def test_singleton_reregistration_raises(reset_injector):
     @Injector.singleton
     class TestService:
         pass
 
-    with pytest.warns(RuntimeWarning):
+    with pytest.raises(TypeError, match="already registered"):
         Injector.singleton(TestService)
     assert len(Injector.singletons) == 1
 
 
-def test_singleton_reload_warns(reset_injector):
+def test_singleton_reload_raises(reset_injector):
+    """A reloaded module produces a new class object with the same name"""
     def make():
         class TestService:
             pass
         return TestService
 
-    Injector.singleton(make())
-    with pytest.warns(RuntimeWarning):
+    first = Injector.singleton(make())
+    with pytest.raises(TypeError, match="already registered"):
         Injector.singleton(make())
+    assert set(Injector._singletons_available) == {first}
 
 
 def test_inject_basic(reset_injector):
@@ -334,22 +336,6 @@ def test_singleton_override_same_class_twice_is_allowed(reset_injector):
     assert isinstance(Injector._get_instance(MailService), FakeMailService)
 
 
-def test_reregistered_singleton_override_uses_new_registration(reset_injector):
-    @Injector.singleton
-    class MailService:
-        pass
-
-    @Injector.override(MailService)
-    @Injector.singleton
-    class FakeMailService(MailService):
-        pass
-
-    with pytest.warns(RuntimeWarning):
-        Injector.singleton(FakeMailService)
-    fresh = Injector._singletons_available[FakeMailService]
-    assert Injector._get_instance(MailService) is fresh.get_instance()
-
-
 def test_override_singleton_after_injection_is_rejected(reset_injector):
     @Injector.singleton
     class MailService:
@@ -489,21 +475,6 @@ def test_override_singleton_all_or_nothing(reset_injector):
             pass
 
     assert type(Injector._get_instance(A)) is A
-
-
-def test_reregistered_singleton_keeps_its_override(reset_injector):
-    @Injector.singleton
-    class MailService:
-        pass
-
-    @Injector.override(MailService)
-    @Injector.singleton
-    class FakeMailService(MailService):
-        pass
-
-    with pytest.warns(RuntimeWarning):
-        Injector.singleton(MailService)
-    assert isinstance(Injector._get_instance(MailService), FakeMailService)
 
 
 def test_override_while_constructor_injects_doesnt_deadlock(reset_injector):
