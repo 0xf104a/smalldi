@@ -122,10 +122,11 @@ thread-safe way, the first time it is needed, that is when an `@Injector.inject`
 Once an instance was requested, a singleton is *frozen* and can no longer be [overridden](#overrides), even if
 creating the instance failed.
 
-### `Injector.singletons`
-`Injector.singletons` is a read-only mapping of every registered singleton class to its instance.
-Reading it creates every singleton that doesn't exist yet, so it freezes the whole registry.
-`Injector.singletons_available` is a deprecated alias for it.
+### `Injector.singletons_available` (deprecated)
+Instances are meant to be reached through injection only. `Injector.singletons_available`, a read-only mapping of
+every registered singleton class to its instance, is kept for compatibility and emits a `DeprecationWarning` when
+read; it is planned to be removed in 1.0.0. Reading it creates every singleton that doesn't exist yet, so it freezes
+the whole registry. It used to be a plain dict; registering or removing singletons through it is no longer possible.
 
 > [!WARNING]
 > Every class is registered once. Registering a class twice, or registering a class with the same module and
@@ -167,7 +168,7 @@ Rules:
   `NotImplementedError`.
 * Interfaces must be abstract classes (with at least one abstract method), so a class can't be both an interface and
   a singleton.
-* Interfaces aren't listed in `Injector.singletons`, only their implementations are.
+* Interfaces aren't listed in `Injector.singletons_available`, only their implementations are.
 * Like singletons, an interface is registered once: registering it again (or a reloaded copy of it) raises
   `TypeError`. Repeating `@Injector.implements` with the same singleton is a no-op.
 
@@ -193,7 +194,7 @@ instance: the same objects `Provide[MemoryStorage]` and `Provide[QuietMeowServic
 * The overriding class must be a singleton and a subclass of every target; a class can't override itself.
   Several targets may be overridden at once: `@Injector.override(Storage, FileStorage)`. If any of them can't be
   overridden, none is.
-* An overridden singleton is never instantiated through the injector, and `Injector.singletons` maps it to its
+* An overridden singleton is never instantiated through the injector, and `Injector.singletons_available` maps it to its
   override's instance.
 * An interface override wins whatever the import order: it may be declared before or after `@Injector.implements`, and
   an implementation declared later doesn't replace it. An interface with only an override is injectable too. The
@@ -205,10 +206,10 @@ instance: the same objects `Provide[MemoryStorage]` and `Provide[QuietMeowServic
   with another class raises `TypeError`. Repeating the same override is a no-op.
 * Targets are *frozen* once an instance was requested through them, even if creating it failed, and overriding a
   frozen target raises `SingletonFrozenError`:
-  * an interface the first time `Provide[Interface]` is resolved, or when `Injector.singletons` is read. Injecting
+  * an interface the first time `Provide[Interface]` is resolved, or when `Injector.singletons_available` is read. Injecting
     the implementation class directly (`Provide[FileStorage]`) doesn't freeze its interfaces;
   * a singleton once it is injected (directly, through an interface it implements, or through a singleton it
-    overrides), when `Injector.singletons` is read, or, for containers, when the first component is registered.
+    overrides), when `Injector.singletons_available` is read, or, for containers, when the first component is registered.
 
   So declare overrides before anything injects their targets. Frozen means frozen: nothing rebinds a frozen
   target, the only binding still accepted is the first `@Injector.implements` of an interface that already has an

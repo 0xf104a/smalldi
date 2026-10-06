@@ -7,18 +7,18 @@ from smalldi.annotation import _Provide
 
 def test_singleton_registration(reset_injector):
     """Test that singleton decorator registers class instance"""
-    assert len(Injector.singletons) == 0
+    assert len(Injector._singletons) == 0
 
     @Injector.singleton
     class TestService:
         def hello(self):
             return "Hello"
 
-    assert len(Injector.singletons) == 1
-    assert TestService in Injector.singletons
-    assert isinstance(Injector.singletons[TestService], TestService)
+    assert len(Injector._singletons) == 1
+    assert TestService in Injector._singletons
+    assert isinstance(Injector._singletons[TestService], TestService)
 
-    service = Injector.singletons[TestService]
+    service = Injector._singletons[TestService]
     assert service.hello() == "Hello"
 
 
@@ -28,7 +28,7 @@ def test_singletons_view_is_read_only(reset_injector):
         pass
 
     with pytest.raises(TypeError):
-        Injector.singletons[TestService] = object()
+        Injector._singletons[TestService] = object()
 
 
 def test_singletons_view_freezes_all(reset_injector):
@@ -39,7 +39,7 @@ def test_singletons_view_freezes_all(reset_injector):
     class Override(TestService):
         pass
 
-    Injector.singletons
+    Injector._singletons
     lazy = Injector._singletons_available[TestService]
     assert lazy.frozen
     with pytest.raises(SingletonFrozenError):
@@ -54,6 +54,8 @@ def test_singletons_available_deprecated(reset_injector):
     with pytest.warns(DeprecationWarning):
         view = Injector.singletons_available
     assert isinstance(view[TestService], TestService)
+    # Reading it freezes the registry like the private snapshot does
+    assert Injector._singletons_available[TestService].frozen
 
 
 def test_singleton_single_instance(reset_injector):
@@ -68,8 +70,8 @@ def test_singleton_single_instance(reset_injector):
 
     assert counter == 0
 
-    first = Injector.singletons[TestService]
-    assert Injector.singletons[TestService] is first
+    first = Injector._singletons[TestService]
+    assert Injector._singletons[TestService] is first
     assert counter == 1
 
 
@@ -80,7 +82,7 @@ def test_singleton_reregistration_raises(reset_injector):
 
     with pytest.raises(TypeError, match="already registered"):
         Injector.singleton(TestService)
-    assert len(Injector.singletons) == 1
+    assert len(Injector._singletons) == 1
 
 
 def test_singleton_reload_raises(reset_injector):
@@ -255,7 +257,7 @@ def test_overridden_singleton_is_never_instantiated(reset_injector):
         pass
 
     Injector._get_instance(MailService)
-    singletons = Injector.singletons
+    singletons = Injector._singletons
     assert created == [FakeMailService]
     assert singletons[MailService] is singletons[FakeMailService]
 
@@ -361,7 +363,7 @@ def test_override_singleton_after_reading_singletons_is_rejected(reset_injector)
     class FakeMailService(MailService):
         pass
 
-    Injector.singletons
+    Injector._singletons
     with pytest.raises(SingletonFrozenError):
         Injector.override(MailService)(FakeMailService)
 

@@ -36,6 +36,9 @@ class _InjectorMeta(type):
     def _singletons(cls) -> Mapping[type, Any]:
         """
         Read-only snapshot of all registered singletons and their instances.
+        Private: the only public way to read it is the deprecated
+        `Injector.singletons_available`, so that nobody freezes the registry
+        by inspecting it without being warned.
 
         Reading this property instantiates every singleton that wasn't created
         yet, which freezes the whole registry: none of the singletons, nor the
@@ -66,16 +69,21 @@ class _InjectorMeta(type):
     @property
     def singletons_available(cls) -> Mapping[type, Any]:
         """
-        Deprecated alias of `Injector.singletons`.
+        Deprecated read-only snapshot of all registered singletons and their
+        instances. Reading it emits a `DeprecationWarning`; it is planned to be
+        removed in 1.0.0.
 
         Unlike in older versions, the returned mapping is a read-only snapshot,
         so singletons can no longer be registered or removed through it.
-        Reading it freezes all singletons, like `Injector.singletons` does.
+        Reading it instantiates every singleton that wasn't created yet and
+        freezes the whole registry. Inject singletons with `@Injector.inject`
+        instead of reading them here.
 
         :return: read-only mapping of singleton class to its instance
         """
         warnings.warn(
-            "Injector.singletons_available is deprecated, use Injector.singletons",
+            "Injector.singletons_available is deprecated and is planned to be removed in 1.0.0; "
+            "inject singletons with @Injector.inject instead of reading them.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -89,8 +97,9 @@ class Injector(metaclass=_InjectorMeta):
 
     `Injector` is a static class: it can't be instantiated and all of its state
     is kept at class level. Classes are registered with `@Injector.singleton`
-    and injected into functions with `@Injector.inject`. Registered instances
-    can be inspected through the read-only `Injector.singletons` property.
+    and injected into functions with `@Injector.inject`. Instances are
+    reached through injection only; the deprecated `Injector.singletons_available`
+    still exposes a read-only snapshot of them, with a warning.
 
     Classes marked with `@Injector.interface` may be injected too: a singleton
     declares that it implements them with `@Injector.implements`, and
@@ -200,7 +209,7 @@ class Injector(metaclass=_InjectorMeta):
         @Injector.inject, so the injector could construct them itself.
 
         The class isn't instantiated here: the instance is created lazily, the
-        first time it is injected or `Injector.singletons` is read. From then on
+        first time it is injected or `Injector.singletons_available` is read. From then on
         the singleton is frozen and can't be overridden, even if creating the
         instance failed.
 
@@ -335,7 +344,7 @@ class Injector(metaclass=_InjectorMeta):
         no-op. A target is frozen once an instance was requested through it,
         after which it can't be overridden: an interface once
         `Provide[Interface]` was resolved, a singleton once it was injected
-        directly or through an interface it implements, `Injector.singletons`
+        directly or through an interface it implements, `Injector.singletons_available`
         was read, or a component was registered in it (containers). A target
         is frozen even if creating its instance failed. Declare overrides
         before the first injection.

@@ -281,7 +281,7 @@ def test_singletons_view_excludes_interfaces(reset_injector):
         def name(self):
             return "memory"
 
-    assert set(Injector.singletons) == {MemoryStorage}
+    assert set(Injector._singletons) == {MemoryStorage}
 
 
 class TestInterfaceResolver:
@@ -549,7 +549,7 @@ def test_override_after_reading_singletons_is_rejected(reset_injector):
         def name(self):
             return "fake"
 
-    Injector.singletons
+    Injector._singletons
     with pytest.raises(SingletonFrozenError):
         Injector.override(Storage)(FakeStorage)
 
