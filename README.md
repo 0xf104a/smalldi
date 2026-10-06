@@ -98,65 +98,18 @@ def main(catnip_container: Provide[CatnipContainer]) -> int:
 if __name__ == '__main__':
     sys.exit(main())
 ```
-
-## Interfaces
-```python
-from abc import ABC, abstractmethod
-
-from smalldi import Injector, Provide
-
-# Define interface for a cat bowl
-class Bowl(ABC):
-    @abstractmethod
-    def fill(self) -> str:
-        pass
-
-# Bind an implementation to the interface.
-# Note that @Injector.implements must be placed above @Injector.singleton
-@Injector.implements(Bowl)
-@Injector.singleton
-class FishBowl(Bowl):
-    def fill(self) -> str:
-        return "Fish!"
-
-# Ask for the interface, get the implementation
-@Injector.inject
-def feed(bowl: Provide[Bowl]):
-    print(bowl.fill())
-
-if __name__ == '__main__':
-    feed()
-```
     
 # Library structure
 ## Injector
 Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
-DI container inside the library. Injector provides three decorators:
+DI container inside the library. Injector provides two decorators:
 * `@Injector.singleton` creates an instance of a class which may further be injected in functions
 * `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton
-* `@Injector.implements(Interface)` binds a singleton to an interface, so `Provide[Interface]` injects it
-
-Dependencies are resolved when `@Injector.inject` is applied, not when the function is called, so every
-injected singleton must be declared before the function which uses it.
 
 ### Singletons
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
 than annotated with `Provide[]` type. Only singletons may be decorated with `@Injector.singleton`. As a consequence, 
-only singleton classes (or interfaces bound to them) may be injected at the current state of library development.
-
-### Interfaces
-`@Injector.implements(Interface)` binds a singleton class to an interface (usually an abstract class), so
-parameters annotated with `Provide[Interface]` receive the instance of that singleton. The decorated class must
-be a concrete subclass of the interface and must already be a singleton, i.e. `@Injector.implements` goes above
-`@Injector.singleton`. The class is still injectable directly as `Provide[Implementation]`.
-
-An interface may be rebound to another implementation (e.g. in tests or plugins) until it is injected for the first
-time. After that the binding is frozen and rebinding to a different implementation raises `InterfaceFrozenError`,
-because functions which were already decorated hold the old implementation.
-
-> [!NOTE]
-> `Injector.singletons_available` is deprecated since 0.3.0 and emits `DeprecationWarning`.
-> Use `@Injector.inject` to obtain singletons instead.
+only singleton classes may be injected at the current state of library development.
 
 ## Provide
 `Provide[T]` is an annotation for injector telling it that instead of this argument
@@ -171,13 +124,12 @@ Then you may register components in the container by annotating them with `@MyCo
 Additionally, `@MyContainer.component` may be called with `()` in order to provide metadata about the component.
 
 ## `Container._get_components`
-The container exposes protected method `_get_components` which returns an iterable of all components
-registered in the container (the decorated classes or functions themselves). Full
-[registrations](#componentregistration) are stored in the `components` attribute.
+The container expose protected method `_get_components` which returns all components registered in the container 
+in form of iterable of [registrations](#ComponentRegistration).
 
-## `Container._on_component_register`
-The container has protected method `_on_component_register(registration)` which is called with the
-[registration](#componentregistration) every time a new component is registered in the container.
+## `Container._on_component_registered`
+The container have protected method `_on_component_registered` which is called every time a new component is registered
+in the container.
 
 ## ComponentRegistration
 `ComponentRegistration` is a dataclass which holds information about registered component which

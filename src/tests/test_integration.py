@@ -5,6 +5,16 @@ from smalldi import Injector
 from smalldi.annotation import Provide
 
 
+@pytest.fixture
+def reset_injector():
+    """Reset Injector state before each test"""
+    old_singletons = Injector.singletons_available.copy()
+    Injector.singletons_available.clear()
+    yield
+    Injector.singletons_available.clear()
+    Injector.singletons_available.update(old_singletons)
+
+
 def test_simple_injection(reset_injector):
     """Test simple dependency injection in real code"""
 

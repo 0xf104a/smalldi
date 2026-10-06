@@ -1,31 +1,19 @@
 import functools
-import warnings
 
 from smalldi.wrappers import staticclass
 from smalldi.annotation import _Provide, Provide
-from smalldi._interface import InterfaceTable, InterfaceFrozenError
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
-__version__ = "0.3.0"
-__all__ = ["Injector", "Provide", "InterfaceFrozenError"]
-
-class _InjectorMeta(type):
-    @property
-    def singletons_available(cls):
-        """Deprecated public alias of the singleton registry."""
-        warnings.warn("Using Injector.singletons_available is deprecated as it is not thread-safe. "
-                      "Use Injector.inject instead.", DeprecationWarning, stacklevel=2)
-        return cls._singletons_available
-
+__version__ = "0.2.0"
+__all__ = ["Injector", "Provide"]
 
 @staticclass
-class Injector(metaclass=_InjectorMeta):
+class Injector:
     """
     The injector class handles all the dependency injections.
     """
-    _singletons_available = {}
-    _interfaces = InterfaceTable()
+    singletons_available = {}
 
     @classmethod
     def inject(cls, fn):
@@ -36,7 +24,9 @@ class Injector(metaclass=_InjectorMeta):
         """
         kwargs_ext = dict()
         for name, tp in _Provide.iter_annotations(fn):
-            kwargs_ext[name] = cls._resolve(tp)
+            if tp not in cls.singletons_available:
+                raise TypeError(f"Singleton {tp} is not available")
+            kwargs_ext[name] = cls.singletons_available[tp]
 
         @functools.wraps(fn)
         def wrapped_fn(*args, **kwargs):
@@ -57,31 +47,5 @@ class Injector(metaclass=_InjectorMeta):
         :param target_cls: Class which to be marked as injectable singleton
         :return: None
         """
-        cls._singletons_available[target_cls] = target_cls()
+        cls.singletons_available[target_cls] = target_cls()
         return target_cls
-
-    @classmethod
-    def implements(cls, interface):
-        """
-        Binds singleton class to interface, so Provide[interface] injects its instance.
-        Must be applied above @Injector.singleton. The binding may be replaced until
-        first injected, after which rebinding raises InterfaceFrozenError.
-        :param interface: interface (usually an abstract class) implemented by the class
-        :return: decorator which binds the class and returns it unaltered
-        """
-        def _wrapper(target_cls):
-            if target_cls not in cls._singletons_available:
-                raise TypeError(f"{target_cls!r} must be a singleton to implement an interface; "
-                                f"apply @Injector.implements above @Injector.singleton")
-            cls._interfaces.set_interface_impl(interface, target_cls)
-            return target_cls
-        return _wrapper
-
-    @classmethod
-    def _resolve(cls, tp):
-        if tp in cls._singletons_available:
-            return cls._singletons_available[tp]
-        impl = cls._interfaces.get_interface_impl(tp)
-        if impl is not None:
-            return cls._singletons_available[impl]
-        raise TypeError(f"Singleton {tp} is not available")
