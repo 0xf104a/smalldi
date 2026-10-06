@@ -1,4 +1,4 @@
-class SingletonFrozenError(Exception):
+class SingletonFrozenException(Exception):
     """The singleton was already injected; it can no longer be overridden."""
 
     def __init__(self, singleton_cls, override_cls):
