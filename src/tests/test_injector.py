@@ -1,3 +1,4 @@
+import threading
 from abc import ABC, abstractmethod
 
 import pytest
@@ -17,14 +18,13 @@ def test_singleton_registration(reset_injector):
 
     assert len(Injector._singletons_available) == 1
     assert TestService in Injector._singletons_available
-    assert isinstance(Injector._singletons_available[TestService], TestService)
-
-    service = Injector._singletons_available[TestService]
+    service = Injector._singletons_available[TestService].get()
+    assert isinstance(service, TestService)
     assert service.hello() == "Hello"
 
 
 def test_singleton_single_instance(reset_injector):
-    """Test that singleton creates only one instance"""
+    """Test that singleton creates only one instance, lazily"""
     counter = 0
 
     @Injector.singleton
@@ -33,11 +33,20 @@ def test_singleton_single_instance(reset_injector):
             nonlocal counter
             counter += 1
 
+    assert counter == 0
+
+    @Injector.inject
+    def fn(first: Provide[TestService], second: Provide[TestService]):
+        return first, second
+
+    assert counter == 0
+    first, second = fn()
+    assert first is second
+    fn()
     assert counter == 1
 
     with pytest.raises(ValueError, match="already marked as singleton"):
         Injector.singleton(TestService)
-    assert counter == 1
 
 
 def test_inject_basic(reset_injector):
@@ -163,6 +172,7 @@ def test_override_singleton_after_injection_raises_frozen(reset_injector):
     def fn(base: Provide[Base]):
         return base
 
+    fn()
     with pytest.raises(SingletonFrozenError) as exc_info:
         @Injector.override(Base)
         @Injector.singleton
@@ -264,6 +274,7 @@ def test_override_singleton_after_interface_injection_raises_frozen(reset_inject
     def fn(bowl: Provide[_Bowl]):
         return bowl.fill()
 
+    assert fn() == "fish"
     with pytest.raises(SingletonFrozenError):
         @Injector.override(FishBowl)
         @Injector.singleton
@@ -272,3 +283,143 @@ def test_override_singleton_after_interface_injection_raises_frozen(reset_inject
                 return "milk"
     assert fn() == "fish"
 
+
+def test_singleton_registered_after_inject(reset_injector):
+    class Service:
+        pass
+
+    @Injector.inject
+    def fn(service: Provide[Service]):
+        return service
+
+    # Resolution happens on call, so registration order doesn't matter
+    Injector.singleton(Service)
+    assert isinstance(fn(), Service)
+
+
+def test_override_singleton_after_inject_before_call(reset_injector):
+    @Injector.singleton
+    class Base:
+        pass
+
+    @Injector.inject
+    def fn(base: Provide[Base]):
+        return base
+
+    @Injector.override(Base)
+    @Injector.singleton
+    class Override(Base):
+        pass
+
+    assert type(fn()) is Override
+
+
+def test_overridden_singleton_is_never_created(reset_injector):
+    created = []
+
+    @Injector.singleton
+    class Base:
+        def __init__(self):
+            created.append(type(self))
+
+    @Injector.override(Base)
+    @Injector.singleton
+    class Override(Base):
+        pass
+
+    @Injector.inject
+    def fn(base: Provide[Base]):
+        return base
+
+    fn()
+    assert created == [Override]
+
+
+def test_unavailable_singleton_raises_on_call(reset_injector):
+    class Missing:
+        pass
+
+    @Injector.inject
+    def fn(missing: Provide[Missing]):
+        return missing
+
+    with pytest.raises(TypeError, match="is not available"):
+        fn()
+    # Explicitly passed dependencies are not resolved
+    value = Missing()
+    assert fn(missing=value) is value
+
+
+def test_failed_creation_does_not_freeze(reset_injector):
+    attempts = 0
+
+    @Injector.singleton
+    class Flaky:
+        def __init__(self):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("boom")
+
+    @Injector.inject
+    def fn(flaky: Provide[Flaky]):
+        return flaky
+
+    with pytest.raises(RuntimeError):
+        fn()
+    assert not Injector._singletons_available[Flaky].frozen
+    assert isinstance(fn(), Flaky)
+
+
+def test_circular_dependency_raises(reset_injector):
+    class First:
+        pass
+
+    class Second:
+        @Injector.inject
+        def __init__(self, first: Provide[First]):
+            pass
+
+    @Injector.inject
+    def first_init(self, second: Provide[Second]):
+        pass
+
+    First.__init__ = first_init
+    Injector.singleton(First)
+    Injector.singleton(Second)
+
+    @Injector.inject
+    def fn(first: Provide[First]):
+        return first
+
+    with pytest.raises(TypeError, match="Circular dependency"):
+        fn()
+
+
+def test_concurrent_injection_creates_single_instance(reset_injector):
+    created = 0
+    started = threading.Barrier(8)
+
+    @Injector.singleton
+    class Slow:
+        def __init__(self):
+            nonlocal created
+            created += 1
+
+    @Injector.inject
+    def fn(slow: Provide[Slow]):
+        return slow
+
+    results = []
+
+    def work():
+        started.wait()
+        results.append(fn())
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert created == 1
+    assert all(r is results[0] for r in results)

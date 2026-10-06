@@ -1,11 +1,11 @@
 import functools
-import threading
+from threading import RLock
 import warnings
 
 from smalldi.wrappers import staticclass
 from smalldi.annotation import _Provide, Provide
 from smalldi._interface import InterfaceTable, InterfaceFrozenError, InterfaceAlreadyBoundError
-from smalldi._singleton import SingletonFrozenError
+from smalldi._singleton import SingletonFrozenError, LazySingleton
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
@@ -16,10 +16,12 @@ __all__ = ["Injector", "Provide", "InterfaceFrozenError", "InterfaceAlreadyBound
 class _InjectorMeta(type):
     @property
     def singletons_available(cls):
-        """Deprecated public alias of the singleton registry."""
+        """Deprecated snapshot of singleton instances; creates and freezes every singleton."""
         warnings.warn("Using Injector.singletons_available is deprecated as it is not thread-safe. "
                       "Use Injector.inject instead.", DeprecationWarning, stacklevel=2)
-        return cls._singletons_available
+        with cls._mutex:
+            singletons = dict(cls._singletons_available)
+        return {tp: singleton.get() for tp, singleton in singletons.items()}
 
 
 @staticclass
@@ -27,28 +29,30 @@ class Injector(metaclass=_InjectorMeta):
     """
     The injector class handles all the dependency injections.
     """
-    _singletons_available = {}
-    _singleton_overrides = {}
-    _singletons_frozen = set()
+    _singletons_available: dict[type, LazySingleton] = {}
     _interfaces = InterfaceTable()
-    _mutex = threading.RLock()
+    _mutex = RLock()
 
     @classmethod
     def inject(cls, fn):
         """
         Injects dependencies into function.
+        Dependencies are resolved on the first call which doesn't pass them explicitly,
+        so singletons and interfaces may be declared and overridden after the function.
         :param fn: function to inject dependencies into
         :return: function with injected dependencies
         """
-        kwargs_ext = dict()
-        for name, tp in _Provide.iter_annotations(fn):
-            kwargs_ext[name] = cls._resolve(tp)
+        dependencies = dict(_Provide.iter_annotations(fn))
+        # Resolved dependencies are frozen, so caching them is safe; racing threads store the same value
+        resolved = {}
 
         @functools.wraps(fn)
         def wrapped_fn(*args, **kwargs):
-            for name, value in kwargs_ext.items():
+            for name, tp in dependencies.items():
                 if name not in kwargs:
-                    kwargs[name] = value
+                    if name not in resolved:
+                        resolved[name] = cls._resolve(tp)
+                    kwargs[name] = resolved[name]
             return fn(*args, **kwargs)
 
         return wrapped_fn
@@ -57,19 +61,16 @@ class Injector(metaclass=_InjectorMeta):
     def singleton(cls, target_cls):
         """
         Marks class as singleton.
-        Singleton classes are instantiated only once by the injector.
+        Singleton classes are instantiated only once by the injector, when first injected.
         Also their __init__ function should have no arguments or be annotated
         with @Injector.inject, so it would
         :param target_cls: Class which to be marked as injectable singleton
-        :return: None
+        :return: target_cls unaltered
         """
-        # Look up in own __dict__: subclasses of a singleton (e.g. its overrides) inherit __singleton__
-        if vars(target_cls).get("__singleton__") is not None:
-            raise ValueError("Class is already marked as singleton")
-        instance = target_cls()
         with cls._mutex:
-            cls._singletons_available[target_cls] = instance
-        target_cls.__singleton__ = instance
+            if target_cls in cls._singletons_available:
+                raise ValueError("Class is already marked as singleton")
+            cls._singletons_available[target_cls] = LazySingleton(target_cls)
         return target_cls
 
     @classmethod
@@ -116,25 +117,20 @@ class Injector(metaclass=_InjectorMeta):
 
     @classmethod
     def _override_singleton(cls, singleton_cls, override_cls):
-        InterfaceTable.check_impl(singleton_cls, override_cls)
         with cls._mutex:
-            current = cls._singleton_overrides.get(singleton_cls)
-            if current is override_cls:
-                return
-            if current is not None:
-                raise InterfaceAlreadyBoundError(singleton_cls, current, override_cls, "override")
-            if singleton_cls in cls._singletons_frozen:
-                raise SingletonFrozenError(singleton_cls, override_cls)
-            cls._singleton_overrides[singleton_cls] = override_cls
+            singleton = cls._singletons_available[singleton_cls]
+            override = cls._singletons_available[override_cls]
+        singleton.override(override)
 
     @classmethod
     def _resolve(cls, tp):
+        # Don't hold the mutex while creating: singleton __init__ may resolve its own dependencies
         with cls._mutex:
-            target = tp if tp in cls._singletons_available else cls._interfaces.get_interface_impl(tp)
-            if target is None:
+            singleton = cls._singletons_available.get(tp)
+        if singleton is None:
+            impl = cls._interfaces.get_interface_impl(tp)
+            if impl is None:
                 raise TypeError(f"Singleton {tp} is not available")
-            # Follow singleton overrides, freezing every singleton on the way
-            while target is not None:
-                cls._singletons_frozen.add(target)
-                impl, target = target, cls._singleton_overrides.get(target)
-            return cls._singletons_available[impl]
+            with cls._mutex:
+                singleton = cls._singletons_available[impl]
+        return singleton.get()

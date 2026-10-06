@@ -213,7 +213,7 @@ def test_provide_interface_injects_implementation(reset_injector):
         return storage
 
     assert isinstance(fn(), Impl)
-    assert fn() is Injector._singletons_available[Impl]
+    assert fn() is Injector._singletons_available[Impl].get()
     assert fn().load() == "impl"
 
 
@@ -260,10 +260,12 @@ def test_implements_rejects_non_implementation(reset_injector):
 
 
 def test_unbound_interface_is_not_available(reset_injector):
+    @Injector.inject
+    def fn(storage: Provide[Storage]):
+        return storage
+
     with pytest.raises(TypeError, match="is not available"):
-        @Injector.inject
-        def fn(storage: Provide[Storage]):
-            return storage
+        fn()
 
 
 def test_second_implements_raises_already_bound(reset_injector):
@@ -471,6 +473,7 @@ def test_override_after_injection_raises(reset_injector):
     def fn(storage: Provide[Storage]):
         return storage.load()
 
+    assert fn() == "baseline"
     with pytest.raises(InterfaceFrozenError):
         @Injector.override(Storage)
         @Injector.singleton
@@ -508,7 +511,7 @@ def test_singleton_constructor_receives_interface(reset_injector):
         def __init__(self, storage: Provide[Storage]):
             self.data = storage.load()
 
-    assert Injector._singletons_available[Service].data == "impl"
+    assert Injector._singletons_available[Service].get().data == "impl"
 
 
 def test_singletons_available_alias_is_deprecated(reset_injector):
@@ -518,5 +521,25 @@ def test_singletons_available_alias_is_deprecated(reset_injector):
 
     with pytest.deprecated_call():
         registry = Injector.singletons_available
-    assert registry is Injector._singletons_available
-    assert Service in registry
+    assert isinstance(registry[Service], Service)
+    assert registry[Service] is Injector._singletons_available[Service].get()
+
+
+def test_interface_bound_after_inject(reset_injector):
+    @Injector.inject
+    def fn(storage: Provide[Storage]):
+        return storage.load()
+
+    @Injector.implements(Storage)
+    @Injector.singleton
+    class Impl(Storage):
+        def load(self) -> str:
+            return "impl"
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class Override(Storage):
+        def load(self) -> str:
+            return "override"
+
+    assert fn() == "override"
