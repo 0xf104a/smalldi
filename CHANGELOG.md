@@ -5,10 +5,6 @@
   optionally only when `on` predicate returns true
 * Add `InterfaceAlreadyBoundError`, raised when binding a second baseline or a second override
 * Add `InterfaceFrozenError`, raised when changing the implementation of an interface which was already injected
-* `@Injector.override` also accepts a singleton class: `@Injector.override(Singleton)` replaces it with a subclass,
-  including wherever it is bound to an interface
-* Add `SingletonFrozenException`, raised when overriding a singleton which was already injected
-* Decorating a class with `@Injector.singleton` twice raises `ValueError` instead of creating a second instance
 * Deprecate `Injector.singletons_available`
 * Allow injecting singletons into container components
 

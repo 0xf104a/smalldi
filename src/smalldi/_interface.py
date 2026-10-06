@@ -91,7 +91,7 @@ class InterfaceTable:
         return self._overrides.get(interface, self._baselines.get(interface))
 
     def _bind(self, slots: dict[type, type], slot: str, interface: type, impl: type) -> None:
-        self.check_impl(interface, impl)
+        self._check_impl(interface, impl)
         with self._lock:
             current = slots.get(interface)
             if current is impl:
@@ -108,13 +108,7 @@ class InterfaceTable:
             slots[interface] = impl
 
     @staticmethod
-    def check_impl(interface: type, impl: type) -> None:
-        """
-        Checks that impl is a concrete subclass of interface.
-        :param interface: interface (usually an abstract class)
-        :param impl: class to check
-        :raises TypeError: if impl is not a concrete subclass of interface
-        """
+    def _check_impl(interface: type, impl: type) -> None:
         if not inspect.isclass(interface):
             raise TypeError(f"Interface must be a class, got {interface!r}")
         if not inspect.isclass(impl):

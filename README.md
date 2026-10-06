@@ -143,8 +143,7 @@ DI container inside the library. Injector provides four decorators:
 * `@Injector.singleton` creates an instance of a class which may further be injected in functions
 * `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton
 * `@Injector.implements(Interface)` binds a singleton to an interface, so `Provide[Interface]` injects it
-* `@Injector.override(Interface)` replaces the implementation bound with `@Injector.implements`;
-  `@Injector.override(Singleton)` replaces a singleton with its subclass
+* `@Injector.override(Interface)` replaces the implementation bound with `@Injector.implements`
 
 Dependencies are resolved when `@Injector.inject` is applied, not when the function is called, so every
 injected singleton must be declared before the function which uses it.
@@ -153,30 +152,6 @@ injected singleton must be declared before the function which uses it.
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
 than annotated with `Provide[]` type. Only singletons may be decorated with `@Injector.singleton`. As a consequence, 
 only singleton classes (or interfaces bound to them) may be injected at the current state of library development.
-Decorating a class with `@Injector.singleton` twice raises `ValueError`.
-
-A singleton may be replaced with its subclass using `@Injector.override(Singleton)`:
-```python
-@Injector.singleton
-class Database:
-    ...
-
-@Injector.override(Database)
-@Injector.singleton
-class TestDatabase(Database):
-    ...
-
-@Injector.inject
-def query(db: Provide[Database]):  # receives TestDatabase instance
-    ...
-```
-The override must be a singleton subclassing the overridden one, and `@Injector.override` goes above
-`@Injector.singleton`. Like an interface, a singleton may be overridden only once (otherwise
-`InterfaceAlreadyBoundError` is raised), and `on` predicate works the same way. Overrides may be chained:
-an override may itself be overridden. If the overridden singleton is bound to an interface (as its baseline or
-override), `Provide[Interface]` receives the override too, as if the interface was overridden with it.
-Once a singleton is injected, directly or through an interface, it is frozen and overriding it raises
-`SingletonFrozenException`.
 
 ### Interfaces
 `@Injector.implements(Interface)` binds a singleton class to an interface (usually an abstract class), so
