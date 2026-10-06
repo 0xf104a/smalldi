@@ -6,7 +6,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from smalldi._interfaces import InterfaceResolver
-from smalldi._singleton import LazySingleton
+from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.concurrency import threadsafe
 from smalldi.wrappers import staticclass
 from smalldi.annotation import _Provide, Provide
@@ -14,7 +14,7 @@ from smalldi.annotation import _Provide, Provide
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
 __version__ = "0.3.0"
-__all__ = ["Injector", "Provide"]
+__all__ = ["Injector", "Provide", "SingletonFrozenError"]
 
 def _same_class(a: type, b: type) -> bool:
     """
@@ -39,8 +39,9 @@ class _InjectorMeta(type):
         Read-only snapshot of all registered singletons and their instances.
 
         Reading this property instantiates every singleton that wasn't created
-        yet, which freezes the whole registry: none of the singletons can be
-        overridden afterwards. Avoid reading it before all overrides are done.
+        yet, which freezes the whole registry: none of the singletons, nor the
+        interfaces implemented so far, can be overridden afterwards. Avoid
+        reading it before all overrides are done.
 
         The snapshot doesn't follow later changes: singletons registered after
         reading it are not included. Read the property again to see them.
@@ -51,6 +52,10 @@ class _InjectorMeta(type):
         """
         with cls._registry_lock:
             registered = list(cls._singletons_available.items())
+            resolver = cls._interface_resolver
+            for interface in list(resolver.interfaces()):
+                if resolver.is_bound(interface):
+                    resolver.freeze(interface)
         return MappingProxyType({tp: s.get_instance() for tp, s in registered})
 
     @property
@@ -100,7 +105,9 @@ class Injector(metaclass=_InjectorMeta):
         """
         Returns the instance of a registered singleton, or of the singleton
         implementing a registered interface, creating it if needed.
-        Creating the instance freezes the singleton.
+        Creating the instance freezes the singleton, and resolving an interface
+        freezes the interface, so it can no longer be rebound by
+        `Injector.override`.
 
         :param tp: registered singleton class or interface
         :return: the singleton instance
@@ -111,6 +118,7 @@ class Injector(metaclass=_InjectorMeta):
             singleton = cls._singletons_available.get(tp)
             if singleton is None and cls._interface_resolver.is_interface(tp):
                 singleton = cls._interface_resolver.resolve(tp)
+                cls._interface_resolver.freeze(tp)
         if singleton is None:
             raise TypeError(f"Singleton {tp} is not available")
         # Outside the lock: a constructor must not block the whole registry
@@ -198,26 +206,28 @@ class Injector(metaclass=_InjectorMeta):
         Marks class as an interface.
 
         Interfaces may be injected with `Provide[Interface]` once a singleton
-        declares that it implements them with `@Injector.implements`. An
-        interface is usually an abstract class, but doesn't have to be. A class
-        can't be both an interface and a singleton.
+        declares that it implements them with `@Injector.implements` or
+        overrides them with `@Injector.override`. An interface must be an
+        abstract class, so it can't be a singleton itself.
 
         Registering the same interface, or a class with the same module and
         qualified name (as happens after `importlib.reload`), more than once
         emits a `RuntimeWarning`. Registering the same class again drops its
-        implementation.
+        implementation and override.
 
-        :param target_cls: Class which to be marked as an interface
+        :param target_cls: abstract class which to be marked as an interface
         :return: `target_cls` unchanged, so this may be used as a decorator
-        :raises TypeError: if `target_cls` is a registered singleton
+        :raises TypeError: if `target_cls` isn't abstract or is a registered singleton
         """
+        if not isabstract(target_cls):
+            raise TypeError(f"Class {target_cls} is not abstract and cannot be an interface")
         with cls._registry_lock:
             if target_cls in cls._singletons_available:
                 raise TypeError(f"Class {target_cls} is a singleton and cannot be an interface")
             if any(_same_class(tp, target_cls) for tp in cls._interface_resolver.interfaces()):
                 warnings.warn(
                     f"Class {target_cls} is registered as an interface more than once "
-                    f"(module reload?). Its implementation must be declared again.",
+                    f"(module reload?). Its implementation and override must be declared again.",
                     RuntimeWarning,
                     stacklevel=2,
                 )
@@ -237,7 +247,9 @@ class Injector(metaclass=_InjectorMeta):
                 ...
 
         `Provide[Storage]` and `Provide[Cache]` then receive the same instance as
-        `Provide[RedisStorage]`. Every interface must be registered with
+        `Provide[RedisStorage]`, unless the interface is overridden with
+        `@Injector.override`: the override wins regardless of which of them was
+        declared first. Every interface must be registered with
         `@Injector.interface` and be a base class of the singleton. Each
         interface has at most one implementation; declaring it again for the
         same class (or a reloaded version of it) rebinds it. Either all
@@ -248,31 +260,108 @@ class Injector(metaclass=_InjectorMeta):
         :raises TypeError: if no interfaces are given; the decorator raises it if
             the class isn't a registered singleton, an interface isn't registered
             or isn't a base class of the singleton, or an interface is already
-            implemented by another class
+            implemented by another class (use `@Injector.override` to replace it)
         """
         if not interfaces:
             raise TypeError("@Injector.implements requires at least one interface")
 
         def decorator(target_cls):
             with cls._registry_lock:
-                singleton = cls._singletons_available.get(target_cls)
-                if singleton is None:
-                    raise TypeError(
-                        f"Class {target_cls} is not a singleton; "
-                        f"apply @Injector.implements above @Injector.singleton"
-                    )
+                singleton = cls._check_binding("implements", target_cls, interfaces)
                 for interface in interfaces:
-                    if not cls._interface_resolver.is_interface(interface):
-                        raise TypeError(f"Class {interface} is not an interface")
-                    if not issubclass(target_cls, interface):
-                        raise TypeError(f"Class {target_cls} is not a subclass of {interface}")
                     current = cls._interface_resolver.implementation_of(interface)
                     if current is not None and not _same_class(current.cls, target_cls):
                         raise TypeError(
-                            f"Interface {interface} is already implemented by {current.cls}"
+                            f"Interface {interface} is already implemented by {current.cls}; "
+                            f"use @Injector.override to replace it"
                         )
                 for interface in interfaces:
                     cls._interface_resolver.set_implementation(interface, singleton)
             return target_cls
 
         return decorator
+
+    @classmethod
+    def override(cls, *interfaces):
+        """
+        Overrides the implementation of interfaces with another singleton.
+
+        Returns a decorator to apply above `@Injector.singleton`::
+
+            @Injector.override(Storage)
+            @Injector.singleton
+            class FakeStorage(Storage):
+                ...
+
+        `Provide[Storage]` then receives the `FakeStorage` instance instead of
+        the implementation declared with `@Injector.implements`. The override
+        may be declared before or after the implementation: it wins either way,
+        so modules may be imported in any order. The implementation stays
+        registered as a singleton, so `Provide[Implementation]` still receives it.
+
+        Each interface may have only one override, so it is unambiguous which
+        singleton gets injected; declaring it again for the same class (or a
+        reloaded version of it) rebinds it. An interface is frozen once it was
+        injected or `Injector.singletons` was read, after which it can't be
+        overridden: declare overrides before the first injection. Every
+        interface must be registered with `@Injector.interface` and be a base
+        class of the singleton. Either all interfaces are overridden or, on
+        error, none of them.
+
+        :param interfaces: interfaces to override with the singleton
+        :return: decorator overriding the interfaces and returning the class unchanged
+        :raises TypeError: if no interfaces are given; the decorator raises it if
+            the class isn't a registered singleton, an interface isn't registered
+            or isn't a base class of the singleton, or an interface is already
+            overridden by another class
+        :raises SingletonFrozenError: raised by the decorator if an interface
+            was already injected
+        """
+        if not interfaces:
+            raise TypeError("@Injector.override requires at least one interface")
+
+        def decorator(target_cls):
+            with cls._registry_lock:
+                singleton = cls._check_binding("override", target_cls, interfaces)
+                for interface in interfaces:
+                    current = cls._interface_resolver.override_of(interface)
+                    if current is not None:
+                        if not _same_class(current.cls, target_cls):
+                            raise TypeError(
+                                f"Interface {interface} is already overridden by {current.cls}"
+                            )
+                    elif cls._interface_resolver.is_frozen(interface):
+                        raise SingletonFrozenError(
+                            f"Interface {interface} was already injected and cannot be overridden"
+                        )
+                for interface in interfaces:
+                    cls._interface_resolver.set_override(interface, singleton)
+            return target_cls
+
+        return decorator
+
+    @classmethod
+    def _check_binding(cls, decorator: str, target_cls: type, interfaces: tuple[type, ...]) -> LazySingleton:
+        """
+        Checks that a singleton may be bound to interfaces.
+        Must be called while holding `_registry_lock`.
+
+        :param decorator: name of the calling decorator, used in error messages
+        :param target_cls: class to bind
+        :param interfaces: interfaces to bind the class to
+        :return: the singleton registered for `target_cls`
+        :raises TypeError: if `target_cls` isn't a registered singleton, or an
+            interface isn't registered or isn't a base class of `target_cls`
+        """
+        singleton = cls._singletons_available.get(target_cls)
+        if singleton is None:
+            raise TypeError(
+                f"Class {target_cls} is not a singleton; "
+                f"apply @Injector.{decorator} above @Injector.singleton"
+            )
+        for interface in interfaces:
+            if not cls._interface_resolver.is_interface(interface):
+                raise TypeError(f"Class {interface} is not an interface")
+            if not issubclass(target_cls, interface):
+                raise TypeError(f"Class {target_cls} is not a subclass of {interface}")
+        return singleton

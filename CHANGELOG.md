@@ -6,8 +6,11 @@
 * Deprecate `Injector.singletons_available` in favour of `Injector.singletons`; it is now read-only
 * Registering a singleton twice (e.g. after a module reload) now emits a `RuntimeWarning`
 * Add `smalldi.concurrency` with `@synchronized` and `@threadsafe` decorators (async functions aren't supported yet)
-* Add interfaces: `@Injector.interface` marks a class as an interface, `@Injector.implements` binds it to a singleton,
+* Add interfaces: `@Injector.interface` marks an abstract class as an interface, `@Injector.implements` binds it to a singleton,
   and `Provide[Interface]` injects the implementation
+* Add `@Injector.override` to inject another singleton for an interface instead of its implementation, regardless of
+  import order; an interface may have one override, declared before it is first injected
+* Export `SingletonFrozenError` from `smalldi`
 * Fix containers with lazy singletons
 
 ## 0.2.0

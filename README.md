@@ -104,8 +104,9 @@ if __name__ == '__main__':
 Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
 DI container inside the library. Injector provides these decorators:
 * `@Injector.singleton` registers a class whose instance may further be injected in functions
-* `@Injector.interface` marks a class as an [interface](#interfaces) singletons may implement
+* `@Injector.interface` marks an abstract class as an [interface](#interfaces) singletons may implement
 * `@Injector.implements(...)` declares which interfaces a singleton implements
+* `@Injector.override(...)` makes a singleton injected for interfaces instead of their implementation
 * `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` (or `Provide[Interface]`) with actual
   instances of Singleton. Every `Provide[]` dependency must already be registered when the function is decorated,
   otherwise `TypeError` is raised.
@@ -162,11 +163,38 @@ Rules:
   `ABC.register` count).
 * `Provide[Interface]` receives the same instance as `Provide[Implementation]`.
 * A function may be decorated with `@Injector.inject` before the interface is implemented, as long as the interface
-  itself is registered. Calling it while the interface has no implementation raises `NotImplementedError`.
-* A class can't be both an interface and a singleton.
+  itself is registered. Calling it while the interface has neither an implementation nor an override raises
+  `NotImplementedError`.
+* Interfaces must be abstract classes (with at least one abstract method), so a class can't be both an interface and
+  a singleton.
 * Interfaces aren't listed in `Injector.singletons`, only their implementations are.
 * Registering an interface twice emits a `RuntimeWarning`, like singletons do. Registering the same class again drops
-  its implementation, which must then be declared again.
+  its implementation and override, which must then be declared again.
+
+### Overriding interfaces
+`@Injector.override` makes another singleton injected for an interface instead of its implementation, for example
+to swap in a fake in tests or a platform-specific implementation. Like `@Injector.implements`, apply it above
+`@Injector.singleton`:
+```python
+@Injector.override(Storage)
+@Injector.singleton
+class MemoryStorage(Storage):
+    def save(self, data: str):
+        self.saved = data
+```
+`Provide[Storage]` then receives the `MemoryStorage` instance. Rules:
+* The override wins whatever the import order: it may be declared before or after `@Injector.implements`, and an
+  implementation declared later doesn't replace it. An interface with only an override is injectable too.
+* Each interface may have only one override, so it is unambiguous which singleton gets injected: a second override
+  with another class raises `TypeError`. Declaring the same class again (e.g. after a reload) is allowed.
+* An interface is *frozen* the first time it is injected, or when `Injector.singletons` is read. Overriding a frozen
+  interface raises `SingletonFrozenError`, so declare overrides before anything injects the interface. Injecting the
+  implementation class directly (`Provide[FileStorage]`) doesn't freeze its interfaces.
+* The implementation stays registered, so `Provide[FileStorage]` still receives a `FileStorage`.
+* Several interfaces may be overridden at once: `@Injector.override(Storage, Cache)`. If any of them can't be
+  overridden, none is.
+
+`SingletonFrozenError` can be imported from `smalldi`.
 
 ## Provide
 `Provide[T]` is an annotation for injector telling it that instead of this argument

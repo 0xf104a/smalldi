@@ -17,6 +17,26 @@ def make_storage():
     return Storage
 
 
+def make_cache():
+    @Injector.interface
+    class Cache(ABC):
+        @abstractmethod
+        def ping(self) -> str:
+            pass
+
+    return Cache
+
+
+class _AbstractA(ABC):
+    @abstractmethod
+    def run(self):
+        pass
+
+
+class _AbstractB(_AbstractA):
+    pass
+
+
 def test_inject_interface_receives_implementation(reset_injector):
     Storage = make_storage()
 
@@ -50,15 +70,16 @@ def test_implements_returns_class_unchanged(reset_injector):
 def test_implements_multiple_interfaces(reset_injector):
     Storage = make_storage()
 
-    @Injector.interface
-    class Cache:
-        pass
+    Cache = make_cache()
 
     @Injector.implements(Storage, Cache)
     @Injector.singleton
     class RedisStorage(Storage, Cache):
         def name(self):
             return "redis"
+
+        def ping(self):
+            return "pong"
 
     @Injector.inject
     def fn(storage: Provide[Storage], cache: Provide[Cache]):
@@ -170,9 +191,7 @@ def test_interface_has_one_implementation(reset_injector):
 def test_implements_binds_all_or_nothing(reset_injector):
     Storage = make_storage()
 
-    @Injector.interface
-    class Cache:
-        pass
+    Cache = make_cache()
 
     with pytest.raises(TypeError):
         @Injector.implements(Storage, Cache)
@@ -216,13 +235,20 @@ def test_reloaded_implementation_rebinds(reset_injector):
     assert type(instance) is not first
 
 
-def test_interface_cannot_be_singleton(reset_injector):
-    @Injector.interface
+def test_interface_must_be_abstract(reset_injector):
     class Concrete:
         pass
 
-    with pytest.raises(TypeError, match="interface"):
-        Injector.singleton(Concrete)
+    with pytest.raises(TypeError, match="not abstract"):
+        Injector.interface(Concrete)
+    assert not Injector._interface_resolver.is_interface(Concrete)
+
+
+def test_interface_cannot_be_singleton(reset_injector):
+    Storage = make_storage()
+
+    with pytest.raises(TypeError):
+        Injector.singleton(Storage)
 
 
 def test_singleton_cannot_be_interface(reset_injector):
@@ -230,7 +256,7 @@ def test_singleton_cannot_be_interface(reset_injector):
     class Service:
         pass
 
-    with pytest.raises(TypeError, match="singleton"):
+    with pytest.raises(TypeError):
         Injector.interface(Service)
 
 
@@ -305,28 +331,390 @@ class TestInterfaceResolver:
     def test_unregistered_interface(self):
         resolver = InterfaceResolver()
         with pytest.raises(TypeError):
-            resolver.resolve(object)
+            resolver.resolve(_AbstractA)
         with pytest.raises(TypeError):
-            resolver.implementation_of(object)
+            resolver.implementation_of(_AbstractA)
         with pytest.raises(TypeError):
-            resolver.set_implementation(object, LazySingleton(object, None))
+            resolver.override_of(_AbstractA)
         with pytest.raises(TypeError):
-            resolver.override_implementation(object, object)
+            resolver.set_implementation(_AbstractA, LazySingleton(int, None))
+        with pytest.raises(TypeError):
+            resolver.set_override(_AbstractA, LazySingleton(int, None))
+        with pytest.raises(TypeError):
+            resolver.override_implementation(_AbstractA, _AbstractB)
+        assert not resolver.is_bound(_AbstractA)
+
+    def test_register_requires_abstract(self):
+        resolver = InterfaceResolver()
+        with pytest.raises(TypeError):
+            resolver.register(object)
 
     def test_unimplemented_interface(self):
         resolver = InterfaceResolver()
-        resolver.register(object)
-        assert resolver.is_interface(object)
-        assert resolver.implementation_of(object) is None
+        resolver.register(_AbstractA)
+        assert resolver.is_interface(_AbstractA)
+        assert not resolver.is_bound(_AbstractA)
+        assert resolver.implementation_of(_AbstractA) is None
+        assert resolver.override_of(_AbstractA) is None
         with pytest.raises(NotImplementedError):
-            resolver.resolve(object)
+            resolver.resolve(_AbstractA)
         with pytest.raises(NotImplementedError):
-            resolver.override_implementation(object, object)
+            resolver.override_implementation(_AbstractA, _AbstractB)
 
     def test_resolve_bound_interface(self):
         resolver = InterfaceResolver()
         singleton = LazySingleton(int, None)
-        resolver.register(object)
-        resolver.set_implementation(object, singleton)
-        assert resolver.resolve(object) is singleton
-        assert list(resolver.interfaces()) == [object]
+        resolver.register(_AbstractA)
+        resolver.set_implementation(_AbstractA, singleton)
+        assert resolver.is_bound(_AbstractA)
+        assert resolver.resolve(_AbstractA) is singleton
+        assert list(resolver.interfaces()) == [_AbstractA]
+
+    def test_override_takes_precedence_in_any_order(self):
+        implementation = LazySingleton(int, None)
+        override = LazySingleton(bool, None)
+
+        resolver = InterfaceResolver()
+        resolver.register(_AbstractA)
+        resolver.set_override(_AbstractA, override)
+        assert resolver.is_bound(_AbstractA)
+        assert resolver.resolve(_AbstractA) is override
+        resolver.set_implementation(_AbstractA, implementation)
+        assert resolver.resolve(_AbstractA) is override
+        assert resolver.implementation_of(_AbstractA) is implementation
+        assert resolver.override_of(_AbstractA) is override
+
+    def test_register_drops_override(self):
+        resolver = InterfaceResolver()
+        resolver.register(_AbstractA)
+        resolver.set_override(_AbstractA, LazySingleton(int, None))
+        resolver.register(_AbstractA)
+        assert resolver.override_of(_AbstractA) is None
+
+
+def make_memory_storage(Storage):
+    @Injector.implements(Storage)
+    @Injector.singleton
+    class MemoryStorage(Storage):
+        def name(self):
+            return "memory"
+
+    return MemoryStorage
+
+
+def test_override_rebinds_interface(reset_injector):
+    Storage = make_storage()
+    MemoryStorage = make_memory_storage(Storage)
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    @Injector.inject
+    def fn(storage: Provide[Storage], memory: Provide[MemoryStorage]):
+        return storage, memory
+
+    storage, memory = fn()
+    assert isinstance(storage, FakeStorage)
+    # The old implementation stays injectable by its own class
+    assert isinstance(memory, MemoryStorage)
+
+
+def test_override_returns_class_unchanged(reset_injector):
+    Storage = make_storage()
+    make_memory_storage(Storage)
+
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    Injector.singleton(FakeStorage)
+    assert Injector.override(Storage)(FakeStorage) is FakeStorage
+
+
+def test_second_override_raises(reset_injector):
+    Storage = make_storage()
+    make_memory_storage(Storage)
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class First(Storage):
+        def name(self):
+            return "first"
+
+    with pytest.raises(TypeError, match="already overridden"):
+        @Injector.override(Storage)
+        @Injector.singleton
+        class Second(Storage):
+            def name(self):
+                return "second"
+
+    assert isinstance(Injector._get_instance(Storage), First)
+
+
+def test_override_same_class_twice_is_allowed(reset_injector):
+    Storage = make_storage()
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    Injector.override(Storage)(FakeStorage)
+    assert isinstance(Injector._get_instance(Storage), FakeStorage)
+
+
+def test_reloaded_override_rebinds(reset_injector):
+    Storage = make_storage()
+
+    def make_fake():
+        class FakeStorage(Storage):
+            def name(self):
+                return "fake"
+        return FakeStorage
+
+    first = Injector.override(Storage)(Injector.singleton(make_fake()))
+    with pytest.warns(RuntimeWarning):
+        second = Injector.singleton(make_fake())
+    Injector.override(Storage)(second)
+
+    assert type(Injector._get_instance(Storage)) is second
+    assert second is not first
+
+
+def test_override_multiple_interfaces(reset_injector):
+    Storage = make_storage()
+
+    Cache = make_cache()
+
+    @Injector.implements(Storage, Cache)
+    @Injector.singleton
+    class RedisStorage(Storage, Cache):
+        def name(self):
+            return "redis"
+
+        def ping(self):
+            return "pong"
+
+    @Injector.override(Storage, Cache)
+    @Injector.singleton
+    class FakeStorage(Storage, Cache):
+        def name(self):
+            return "fake"
+
+        def ping(self):
+            return "fake pong"
+
+    assert Injector._get_instance(Storage) is Injector._get_instance(Cache)
+    assert isinstance(Injector._get_instance(Cache), FakeStorage)
+
+
+def test_override_requires_interfaces(reset_injector):
+    with pytest.raises(TypeError):
+        Injector.override()
+
+
+def test_override_requires_singleton(reset_injector):
+    Storage = make_storage()
+    make_memory_storage(Storage)
+
+    with pytest.raises(TypeError, match="above @Injector.singleton"):
+        @Injector.singleton
+        @Injector.override(Storage)
+        class FakeStorage(Storage):
+            def name(self):
+                return "fake"
+
+
+def test_override_requires_registered_interface(reset_injector):
+    class NotInterface:
+        pass
+
+    with pytest.raises(TypeError, match="not an interface"):
+        @Injector.override(NotInterface)
+        @Injector.singleton
+        class Impl(NotInterface):
+            pass
+
+
+def test_override_requires_subclass(reset_injector):
+    Storage = make_storage()
+    make_memory_storage(Storage)
+
+    with pytest.raises(TypeError, match="not a subclass"):
+        @Injector.override(Storage)
+        @Injector.singleton
+        class Unrelated:
+            pass
+
+
+def test_override_before_implementation_wins(reset_injector):
+    """An override module may be imported before the implementation module"""
+    Storage = make_storage()
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    @Injector.inject
+    def fn(storage: Provide[Storage]):
+        return storage
+
+    MemoryStorage = make_memory_storage(Storage)
+
+    assert isinstance(fn(), FakeStorage)
+    assert Injector._interface_resolver.implementation_of(Storage).cls is MemoryStorage
+
+
+def test_override_without_implementation_is_injected(reset_injector):
+    Storage = make_storage()
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    assert isinstance(Injector._get_instance(Storage), FakeStorage)
+
+
+def test_implementation_after_injected_override_is_allowed(reset_injector):
+    """Declaring the implementation late doesn't change what was injected"""
+    Storage = make_storage()
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    first = Injector._get_instance(Storage)
+    make_memory_storage(Storage)
+    assert Injector._get_instance(Storage) is first
+
+
+def test_override_after_injection_is_rejected(reset_injector):
+    Storage = make_storage()
+    MemoryStorage = make_memory_storage(Storage)
+
+    @Injector.inject
+    def fn(storage: Provide[Storage]):
+        return storage
+
+    fn()
+
+    with pytest.raises(SingletonFrozenError):
+        @Injector.override(Storage)
+        @Injector.singleton
+        class FakeStorage(Storage):
+            def name(self):
+                return "fake"
+
+    assert isinstance(fn(), MemoryStorage)
+
+
+def test_override_after_reading_singletons_is_rejected(reset_injector):
+    Storage = make_storage()
+    make_memory_storage(Storage)
+
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    Injector.singletons
+    with pytest.raises(SingletonFrozenError):
+        Injector.override(Storage)(FakeStorage)
+
+
+def test_override_allowed_when_only_implementation_was_injected(reset_injector):
+    """Injecting the implementation class directly doesn't freeze its interfaces"""
+    Storage = make_storage()
+    MemoryStorage = make_memory_storage(Storage)
+
+    @Injector.inject
+    def fn(memory: Provide[MemoryStorage]):
+        return memory
+
+    fn()
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    assert isinstance(Injector._get_instance(Storage), FakeStorage)
+
+
+def test_override_binds_all_or_nothing(reset_injector):
+    Storage = make_storage()
+    Cache = make_cache()
+
+    @Injector.override(Cache)
+    @Injector.singleton
+    class FakeCache(Cache):
+        def ping(self):
+            return "fake pong"
+
+    with pytest.raises(TypeError, match="already overridden"):
+        @Injector.override(Storage, Cache)
+        @Injector.singleton
+        class FakeStorage(Storage, Cache):
+            def name(self):
+                return "fake"
+
+            def ping(self):
+                return "pong"
+
+    assert Injector._interface_resolver.override_of(Storage) is None
+
+
+def test_second_implementation_raises_despite_override(reset_injector):
+    Storage = make_storage()
+    make_memory_storage(Storage)
+
+    @Injector.override(Storage)
+    @Injector.singleton
+    class FakeStorage(Storage):
+        def name(self):
+            return "fake"
+
+    with pytest.raises(TypeError, match="@Injector.override"):
+        @Injector.implements(Storage)
+        @Injector.singleton
+        class Another(Storage):
+            def name(self):
+                return "another"
+
+
+def test_interface_reregistration_unfreezes(reset_injector):
+    Storage = make_storage()
+    make_memory_storage(Storage)
+    Injector._get_instance(Storage)
+    assert Injector._interface_resolver.is_frozen(Storage)
+
+    with pytest.warns(RuntimeWarning):
+        Injector.interface(Storage)
+    assert not Injector._interface_resolver.is_frozen(Storage)
+
+
+def test_singleton_frozen_error_is_public():
+    import smalldi
+    assert smalldi.SingletonFrozenError is SingletonFrozenError
+    assert "SingletonFrozenError" in smalldi.__all__
+
+
+def test_resolver_freeze():
+    resolver = InterfaceResolver()
+    with pytest.raises(TypeError):
+        resolver.freeze(_AbstractA)
+    resolver.register(_AbstractA)
+    assert not resolver.is_frozen(_AbstractA)
+    resolver.freeze(_AbstractA)
+    assert resolver.is_frozen(_AbstractA)
