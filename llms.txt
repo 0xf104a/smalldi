@@ -7,8 +7,7 @@ Core API:
 - `from smalldi import Injector, Provide`
 - `@Injector.singleton` on a class registers it and creates its single instance immediately.
 - `@Injector.inject` on a function (or `__init__`) fills parameters annotated `Provide[T]` with the `T` singleton. Dependencies are resolved when the function is decorated, so `T` must be declared as a singleton before that. Explicit keyword arguments override injected values.
-- `@Injector.implements(Iface)` placed above `@Injector.singleton` binds that singleton to an interface, so `Provide[Iface]` injects it. An interface has one such baseline; a second one raises `smalldi.InterfaceAlreadyBoundError`.
-- `@Injector.override(Iface)` (also above `@Injector.singleton`) replaces the baseline, once, in either declaration order. Pass `on=lambda: <condition>` to apply it only when the condition holds at decoration time. Changing what an interface resolves to after it was first injected raises `smalldi.InterfaceFrozenError`.
+- `@Injector.implements(Iface)` placed above `@Injector.singleton` binds that singleton to an interface, so `Provide[Iface]` injects it. Rebinding after the interface was first injected raises `smalldi.InterfaceFrozenError`.
 - `from smalldi.container import Container`: subclass it, decorate the subclass with `@Injector.singleton`, then register components with `@MyContainer.component` or `@MyContainer.component(*meta, **meta)`. Inside the container, `self._get_components()` yields registered components; override `_on_component_register(registration)` to react to registrations.
 - `from smalldi.collector import Collector`: `Collector.collect_from_package("pkg")` imports every module in a package so their decorators run. Call it only from a top-level module to avoid circular imports.
 

@@ -3,12 +3,12 @@ import warnings
 
 from smalldi.wrappers import staticclass
 from smalldi.annotation import _Provide, Provide
-from smalldi._interface import InterfaceTable, InterfaceFrozenError, InterfaceAlreadyBoundError
+from smalldi._interface import InterfaceTable, InterfaceFrozenError
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
 __version__ = "0.3.0"
-__all__ = ["Injector", "Provide", "InterfaceFrozenError", "InterfaceAlreadyBoundError"]
+__all__ = ["Injector", "Provide", "InterfaceFrozenError"]
 
 class _InjectorMeta(type):
     @property
@@ -63,38 +63,17 @@ class Injector(metaclass=_InjectorMeta):
     @classmethod
     def implements(cls, interface):
         """
-        Binds singleton class to interface as its baseline implementation,
-        so Provide[interface] injects its instance. Must be applied above @Injector.singleton.
-        An interface has exactly one baseline; use @Injector.override to replace it.
+        Binds singleton class to interface, so Provide[interface] injects its instance.
+        Must be applied above @Injector.singleton. The binding may be replaced until
+        first injected, after which rebinding raises InterfaceFrozenError.
         :param interface: interface (usually an abstract class) implemented by the class
         :return: decorator which binds the class and returns it unaltered
         """
-        return cls._binder(interface, cls._interfaces.set_interface_impl, "implements")
-
-    @classmethod
-    def override(cls, interface, on=lambda: True):
-        """
-        Overrides the baseline implementation of interface with singleton class.
-        Must be applied above @Injector.singleton. An interface may be overridden only once,
-        before it is first injected; the override may be declared before or after the baseline.
-        :param interface: interface (usually an abstract class) implemented by the class
-        :param on: predicate called once at decoration time; if it returns false,
-            the override is skipped and the class is left unbound
-        :return: decorator which binds the class and returns it unaltered
-        """
-        if not callable(on):
-            raise TypeError(f"{on!r} is not callable")
-        if on():
-            return cls._binder(interface, cls._interfaces.set_interface_override, "override")
-        return lambda target_cls: target_cls
-
-    @classmethod
-    def _binder(cls, interface, bind, decorator_name):
         def _wrapper(target_cls):
             if target_cls not in cls._singletons_available:
                 raise TypeError(f"{target_cls!r} must be a singleton to implement an interface; "
-                                f"apply @Injector.{decorator_name} above @Injector.singleton")
-            bind(interface, target_cls)
+                                f"apply @Injector.implements above @Injector.singleton")
+            cls._interfaces.set_interface_impl(interface, target_cls)
             return target_cls
         return _wrapper
 
