@@ -43,6 +43,16 @@ class Container:
 
     @classmethod
     def _register_component(cls, component: Any, args: tuple[Any], kwargs: dict[str, Any]):
+        """
+        Registers a component in the container singleton instance and notifies
+        it through `_on_component_register`. Instantiates (and so freezes) the
+        container singleton if it wasn't created yet.
+
+        :param component: component to register
+        :param args: metadata arguments passed to the component decorator
+        :param kwargs: metadata keyword arguments passed to the component decorator
+        :raises TypeError: if the container isn't a registered singleton or `component` is None
+        """
         singleton = Injector._singletons_available.get(cls)
         if singleton is None:
             raise TypeError(f"Injector must be a singleton to use components")
