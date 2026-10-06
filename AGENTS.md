@@ -19,6 +19,8 @@ src/
     collector.py    # Collector.collect_from_package: imports modules to trigger decorators
     wrappers.py     # @staticclass (forbids instantiation)
     _interface.py   # InterfaceTable (private); its exceptions are re-exported from smalldi
+    _singleton.py   # LazySingleton (private), SingletonFrozenError (re-exported from smalldi)
+    threading.py    # @threadsafe, @threadsafe_fn, @threadsafe_cls (reentrant locks)
     py.typed
   tests/            # pytest suite, one file per module (see src/tests/README.md)
 pyproject.toml      # hatchling build, package metadata
@@ -43,15 +45,21 @@ Publishing to PyPI happens on GitHub release (`.github/workflows/publish.yaml`).
 ## How the library works (things that are easy to get wrong)
 
 - `Injector` is a static class: never instantiate it. State lives in class attributes:
-  `Injector._singletons_available` (`type -> instance`) and `Injector._interfaces` (an
-  `InterfaceTable`). The public `Injector.singletons_available` is a deprecated alias (on the
+  `Injector._singletons_available` (`type -> LazySingleton`; `.get()` returns the instance) and
+  `Injector._interfaces` (an `InterfaceTable`). The public `Injector.singletons_available` is a deprecated alias (on the
   metaclass) that emits `DeprecationWarning`; don't use it in library code or tests.
-- `@Injector.singleton` instantiates the class **immediately at decoration time**. Its `__init__`
-  must take no arguments other than `Provide[...]` ones injected via `@Injector.inject`.
-- `@Injector.inject` resolves dependencies **at decoration time**, not at call time. Every
-  `Provide[T]` dependency must already be registered as a singleton when the decorated function
-  is defined, otherwise `TypeError("Singleton ... is not available")` is raised. Definition order
-  matters.
+- `@Injector.singleton` only registers the class; it is instantiated **lazily, on first injection**
+  (`LazySingleton.get()`). Its `__init__` must take no arguments other than `Provide[...]` ones
+  injected via `@Injector.inject`. Creation freezes the singleton. Circular dependencies raise
+  `TypeError`. Registering the same class twice raises `ValueError`.
+- `@Injector.inject` reads `Provide[T]` annotations at decoration time but resolves them **on the
+  first call** (then caches them), so definition order doesn't matter. A missing dependency raises
+  `TypeError("Singleton ... is not available")` on call. Tests that check freezing must call the
+  function first.
+- `@Injector.override(Singleton)` (above `@Injector.singleton` on a subclass) makes the singleton's
+  `LazySingleton` delegate to the subclass's one, so both resolve to one instance; this also
+  redirects interfaces bound to the overridden singleton. One override per singleton
+  (`InterfaceAlreadyBoundError`); overriding a created singleton raises `SingletonFrozenError`.
 - `@Injector.implements(Iface)` and `@Injector.override(Iface)` must be applied above
   `@Injector.singleton`. Each interface has one baseline (`implements`) and at most one override,
   in either declaration order; the override wins. A second, different class in either slot raises
@@ -63,6 +71,10 @@ Publishing to PyPI happens on GitHub release (`.github/workflows/publish.yaml`).
 - `Container` subclasses must be decorated with `@Injector.singleton`. `@MyContainer.component`
   works both bare and called with metadata (`@MyContainer.component(...)`). `_get_components`
   yields component objects; full `ComponentRegistration`s live in `container.components`.
+  Registrations are stored per container class (not on the instance), so registering doesn't create
+  the container; `_on_component_register` is replayed for earlier registrations when it is created.
+- `smalldi/threading.py` shadows the stdlib name inside the package: in `smalldi/__init__.py` import
+  from stdlib as `from threading import ...` before importing submodules, never `import threading`.
 
 ## Conventions
 
