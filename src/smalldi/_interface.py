@@ -41,27 +41,7 @@ class InterfaceTable:
         self._baselines: dict[type, type] = {}
         self._overrides: dict[type, type] = {}
         self._frozen_interfaces: set[type] = set()
-        self._declared: set[type] = set()
         self._lock = threading.Lock()
-
-    def declare(self, interface: type) -> None:
-        """
-        Marks class as used as an interface, even if no implementation ends up bound to it
-        (e.g. a skipped conditional override).
-        :param interface: interface to mark
-        """
-        with self._lock:
-            self._declared.add(interface)
-
-    def is_declared(self, interface: type) -> bool:
-        """
-        Checks whether class was declared as an interface or has a binding.
-        :param interface: class to check
-        :return: True if class is used as an interface
-        """
-        with self._lock:
-            return (interface in self._declared or interface in self._baselines
-                    or interface in self._overrides)
 
     def is_frozen(self, interface: type) -> bool:
         """

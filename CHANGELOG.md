@@ -5,24 +5,19 @@
   optionally only when `on` predicate returns true
 * Add `InterfaceAlreadyBoundError`, raised when binding a second baseline or a second override
 * Add `InterfaceFrozenError`, raised when changing the implementation of an interface which was already injected
-* `@Injector.override` validates the override even when its `on` predicate returns false
-* `@Injector.implements` and `@Injector.override` raise `TypeError` when the interface is itself a singleton,
-  and `@Injector.singleton` raises `TypeError` on a class already used as an interface
-  (previously such bindings were silently ignored)
+* `@Injector.override` also accepts a singleton class: `@Injector.override(Singleton)` replaces it with a subclass,
+  including wherever it is bound to an interface
+* Add `SingletonFrozenError`, raised when overriding a singleton which was already injected
 * Decorating a class with `@Injector.singleton` twice raises `ValueError` instead of creating a second instance
-* **Breaking:** singletons are created lazily on first injection instead of at decoration time:
-  `__init__` side effects and errors move from import time to first use
+* **Breaking:** singletons are created lazily on first injection instead of at decoration time
 * **Breaking:** `@Injector.inject` resolves dependencies on the first call instead of at decoration time,
-  so declaration order no longer matters; missing dependencies raise `TypeError` on call.
-  Interfaces freeze on the first call of a function injecting them, so whether a late binding raises
-  `InterfaceFrozenError` depends on whether that function was already called
-* Circular dependencies between singletons raise `TypeError`, also when threads create them concurrently
+  so declaration order no longer matters; missing dependencies raise `TypeError` on call
+* Circular dependencies between singletons raise `TypeError`
 * Registering a component doesn't create the container; earlier registrations are passed to
   `_on_component_register` when the container is created. Containers also get components of the
-  container classes they inherit from. `Container.components` is a read-only property
-* Add `smalldi.concurrency` with `@threadsafe`, `@threadsafe_fn` and `@threadsafe_cls`
-* Deprecate `Injector.singletons_available`. **Breaking:** it is a read-only snapshot of singletons which were
-  already created (singletons not injected yet are missing), and assigning to it raises `AttributeError`
+  container classes they inherit from
+* Add `smalldi.threading` with `@threadsafe`, `@threadsafe_fn` and `@threadsafe_cls`
+* Deprecate `Injector.singletons_available`
 * Allow injecting singletons into container components
 
 ## 0.2.0

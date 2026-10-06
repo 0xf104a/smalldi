@@ -8,5 +8,5 @@ This module contains tests for a smalldi library with the use of pytest
 - `test_wrappers.py` - Tests for wrappers (currently only `staticclass`)
 - `test_integration.py` - Library-level tests
 - `test_container.py` - Tests for `Container`
-- `test_concurrency.py` - Tests for `smalldi.concurrency`
+- `test_threading.py` - Tests for `smalldi.threading`
 - `test_interface.py` - Tests for interface bindings (`InterfaceTable`, `Injector.implements`, `Injector.override`)

@@ -519,34 +519,10 @@ def test_singletons_available_alias_is_deprecated(reset_injector):
     class Service:
         pass
 
-    @Injector.inject
-    def fn(service: Provide[Service]):
-        return service
-
-    service = fn()
     with pytest.deprecated_call():
         registry = Injector.singletons_available
-    assert registry == {Service: service}
-
-
-def test_singletons_available_alias_does_not_create_singletons(reset_injector):
-    created = []
-
-    @Injector.singleton
-    class Service:
-        def __init__(self):
-            created.append(self)
-
-    with pytest.deprecated_call():
-        registry = Injector.singletons_available
-    assert registry == {}
-    assert created == []
-    assert not Injector._singletons_available[Service].frozen
-
-
-def test_singletons_available_alias_is_read_only():
-    with pytest.raises(AttributeError):
-        Injector.singletons_available = {}
+    assert isinstance(registry[Service], Service)
+    assert registry[Service] is Injector._singletons_available[Service].get()
 
 
 def test_interface_bound_after_inject(reset_injector):
@@ -567,63 +543,3 @@ def test_interface_bound_after_inject(reset_injector):
             return "override"
 
     assert fn() == "override"
-
-
-@pytest.mark.parametrize("decorator", ["implements", "override"])
-def test_binding_to_singleton_raises(reset_injector, decorator):
-    @Injector.singleton
-    class Base:
-        pass
-
-    with pytest.raises(TypeError, match="is a singleton"):
-        @getattr(Injector, decorator)(Base)
-        @Injector.singleton
-        class Impl(Base):
-            pass
-
-
-@pytest.mark.parametrize("bind", [
-    lambda impl: Injector.implements(Storage)(impl),
-    lambda impl: Injector.override(Storage)(impl),
-    lambda impl: Injector.override(Storage, on=lambda: False)(impl),
-])
-def test_singleton_on_interface_key_raises(reset_injector, bind):
-    @Injector.singleton
-    class Impl(Storage):
-        def load(self) -> str:
-            return "impl"
-
-    bind(Impl)
-    with pytest.raises(TypeError, match="is an interface"):
-        Injector.singleton(Storage)
-
-
-def test_skipped_override_validates_singleton(reset_injector):
-    class NotSingleton(Storage):
-        def load(self) -> str:
-            return "x"
-
-    with pytest.raises(TypeError, match="must be a singleton"):
-        Injector.override(Storage, on=lambda: False)(NotSingleton)
-
-
-def test_skipped_override_validates_implementation(reset_injector):
-    @Injector.singleton
-    class NotStorage:
-        pass
-
-    with pytest.raises(TypeError, match="does not implement"):
-        Injector.override(Storage, on=lambda: False)(NotStorage)
-
-
-def test_skipped_override_validates_interface_is_not_singleton(reset_injector):
-    @Injector.singleton
-    class Base:
-        pass
-
-    @Injector.singleton
-    class Impl(Base):
-        pass
-
-    with pytest.raises(TypeError, match="is a singleton"):
-        Injector.override(Base, on=lambda: False)(Impl)

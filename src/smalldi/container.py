@@ -18,9 +18,7 @@ class ComponentRegistration:
     kwargs: dict[str, Any]
 
 # Registrations are kept per container class, so components may be registered before the container
-# singleton is created; an instance gets components of every container class it inherits.
-# _lock guards only these lists and is never held while calling user code (_on_component_register),
-# so it is always acquired last: after the singleton creation lock, never before it.
+# singleton is created (or overridden); an instance gets components of every container class it inherits
 _lock = RLock()
 _registrations: list[tuple[type, ComponentRegistration]] = []
 _instances: list["Container"] = []
@@ -41,13 +39,11 @@ class Container:
             return [registration for owner, registration in _registrations if isinstance(self, owner)]
 
     def _on_singleton_created(self):
-        # Called by the injector once the instance is fully created; replay registrations made before.
-        # Adding the instance and taking the snapshot atomically hooks every registration exactly once
+        # Called by the injector once the instance is fully created; replay registrations made before
         with _lock:
             _instances.append(self)
-            registrations = self.components
-        for registration in registrations:
-            self._on_component_register(registration)
+            for registration in self.components:
+                self._on_component_register(registration)
 
     def _get_components(self) -> Iterable[Any]:
         """
@@ -76,9 +72,9 @@ class Container:
         registration = ComponentRegistration(component, args, kwargs)
         with _lock:
             _registrations.append((cls, registration))
-            instances = [instance for instance in _instances if isinstance(instance, cls)]
-        for instance in instances:
-            instance._on_component_register(registration)
+            for instance in _instances:
+                if isinstance(instance, cls):
+                    instance._on_component_register(registration)
 
     @classmethod
     def component(cls, *args, **kwargs):
