@@ -1,6 +1,5 @@
 import dataclasses
 from inspect import isfunction, isclass
-from threading import RLock
 from typing import Any, Iterable
 
 from smalldi import Injector
@@ -17,33 +16,13 @@ class ComponentRegistration:
     args: tuple[Any]
     kwargs: dict[str, Any]
 
-# Registrations are kept per container class, so components may be registered before the container
-# singleton is created (or overridden); an instance gets components of every container class it inherits
-_lock = RLock()
-_registrations: list[tuple[type, ComponentRegistration]] = []
-_instances: list["Container"] = []
-
-
 class Container:
     """
     Container is a class that allows collecting classes or functions
     The container must be a singleton
     """
-    @property
-    def components(self) -> list[ComponentRegistration]:
-        """
-        Registrations of components of this container (and of the containers it inherits) in order
-        of registration
-        """
-        with _lock:
-            return [registration for owner, registration in _registrations if isinstance(self, owner)]
-
-    def _on_singleton_created(self):
-        # Called by the injector once the instance is fully created; replay registrations made before
-        with _lock:
-            _instances.append(self)
-            for registration in self.components:
-                self._on_component_register(registration)
+    def __init__(self):
+        self.components: list[ComponentRegistration] = []
 
     def _get_components(self) -> Iterable[Any]:
         """
@@ -55,8 +34,7 @@ class Container:
 
     def _on_component_register(self, registration: ComponentRegistration):
         """
-        Called when a component is registered, or, for components registered before
-        the container was created, right after the container is created
+        Called when a component is registered
 
         :param registration: registration data of a component
         :return: None
@@ -69,12 +47,9 @@ class Container:
             raise TypeError(f"Injector must be a singleton to use components")
         if component is None:
             raise TypeError("Component cannot be None")
-        registration = ComponentRegistration(component, args, kwargs)
-        with _lock:
-            _registrations.append((cls, registration))
-            for instance in _instances:
-                if isinstance(instance, cls):
-                    instance._on_component_register(registration)
+        this = Injector._singletons_available[cls]
+        this.components.append(ComponentRegistration(component, args, kwargs))
+        this._on_component_register(ComponentRegistration(component, args, kwargs))
 
     @classmethod
     def component(cls, *args, **kwargs):
