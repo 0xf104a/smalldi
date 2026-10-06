@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import pytest
 
-from smalldi import Injector, Provide, InterfaceAlreadyBoundError, SingletonFrozenException
+from smalldi import Injector, Provide, InterfaceAlreadyBoundError, SingletonFrozenError
 from smalldi.annotation import _Provide
 
 
@@ -163,7 +163,7 @@ def test_override_singleton_after_injection_raises_frozen(reset_injector):
     def fn(base: Provide[Base]):
         return base
 
-    with pytest.raises(SingletonFrozenException) as exc_info:
+    with pytest.raises(SingletonFrozenError) as exc_info:
         @Injector.override(Base)
         @Injector.singleton
         class Override(Base):
@@ -194,7 +194,7 @@ def test_override_singleton_chain(reset_injector):
 
     assert type(fn()) is Leaf
     # Every singleton on the chain is frozen
-    with pytest.raises(SingletonFrozenException):
+    with pytest.raises(SingletonFrozenError):
         @Injector.override(Leaf)
         @Injector.singleton
         class AfterLeaf(Leaf):
@@ -264,7 +264,7 @@ def test_override_singleton_after_interface_injection_raises_frozen(reset_inject
     def fn(bowl: Provide[_Bowl]):
         return bowl.fill()
 
-    with pytest.raises(SingletonFrozenException):
+    with pytest.raises(SingletonFrozenError):
         @Injector.override(FishBowl)
         @Injector.singleton
         class MilkBowl(FishBowl):

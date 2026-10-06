@@ -5,13 +5,13 @@ import warnings
 from smalldi.wrappers import staticclass
 from smalldi.annotation import _Provide, Provide
 from smalldi._interface import InterfaceTable, InterfaceFrozenError, InterfaceAlreadyBoundError
-from smalldi._singleton import SingletonFrozenException
+from smalldi._singleton import SingletonFrozenError
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
 __version__ = "0.3.0"
 __all__ = ["Injector", "Provide", "InterfaceFrozenError", "InterfaceAlreadyBoundError",
-           "SingletonFrozenException"]
+           "SingletonFrozenError"]
 
 class _InjectorMeta(type):
     @property
@@ -124,7 +124,7 @@ class Injector(metaclass=_InjectorMeta):
             if current is not None:
                 raise InterfaceAlreadyBoundError(singleton_cls, current, override_cls, "override")
             if singleton_cls in cls._singletons_frozen:
-                raise SingletonFrozenException(singleton_cls, override_cls)
+                raise SingletonFrozenError(singleton_cls, override_cls)
             cls._singleton_overrides[singleton_cls] = override_cls
 
     @classmethod
