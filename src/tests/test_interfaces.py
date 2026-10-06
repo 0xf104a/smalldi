@@ -533,7 +533,7 @@ def test_override_requires_registered_interface(reset_injector):
     class NotInterface:
         pass
 
-    with pytest.raises(TypeError, match="not an interface"):
+    with pytest.raises(TypeError, match="neither an interface nor a singleton"):
         @Injector.override(NotInterface)
         @Injector.singleton
         class Impl(NotInterface):

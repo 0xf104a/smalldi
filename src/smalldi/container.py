@@ -46,19 +46,20 @@ class Container:
         """
         Registers a component in the container singleton instance and notifies
         it through `_on_component_register`. Instantiates (and so freezes) the
-        container singleton if it wasn't created yet.
+        container singleton if it wasn't created yet. If the container is
+        overridden with `@Injector.override`, the override's instance receives
+        the component.
 
         :param component: component to register
         :param args: metadata arguments passed to the component decorator
         :param kwargs: metadata keyword arguments passed to the component decorator
         :raises TypeError: if the container isn't a registered singleton or `component` is None
         """
-        singleton = Injector._singletons_available.get(cls)
-        if singleton is None:
+        if cls not in Injector._singletons_available:
             raise TypeError(f"Injector must be a singleton to use components")
         if component is None:
             raise TypeError("Component cannot be None")
-        this = singleton.get_instance()
+        this = Injector._get_instance(cls)
         this.components.append(ComponentRegistration(component, args, kwargs))
         this._on_component_register(ComponentRegistration(component, args, kwargs))
 

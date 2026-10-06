@@ -214,3 +214,277 @@ def test_singleton_rejects_abstract(reset_injector):
 
     with pytest.raises(TypeError):
         Injector.singleton(Abstract)
+
+
+def test_override_singleton(reset_injector):
+    @Injector.singleton
+    class MailService:
+        def send(self):
+            return "sent"
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        def send(self):
+            return "faked"
+
+    @Injector.inject
+    def fn(mail: _Provide[MailService], fake: _Provide[FakeMailService]):
+        return mail, fake
+
+    mail, fake = fn()
+    assert mail.send() == "faked"
+    # Same instance as injecting the override directly
+    assert mail is fake
+
+
+def test_overridden_singleton_is_never_instantiated(reset_injector):
+    created = []
+
+    @Injector.singleton
+    class MailService:
+        def __init__(self):
+            created.append(type(self))
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        pass
+
+    Injector._get_instance(MailService)
+    singletons = Injector.singletons
+    assert created == [FakeMailService]
+    assert singletons[MailService] is singletons[FakeMailService]
+
+
+def test_override_singleton_requires_subclass(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    with pytest.raises(TypeError, match="not a subclass"):
+        @Injector.override(MailService)
+        @Injector.singleton
+        class Unrelated:
+            pass
+
+
+def test_override_singleton_with_itself_is_rejected(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    with pytest.raises(TypeError, match="itself"):
+        Injector.override(MailService)(MailService)
+
+
+def test_override_requires_registered_singleton(reset_injector):
+    class NotSingleton:
+        pass
+
+    with pytest.raises(TypeError, match="neither an interface nor a singleton"):
+        @Injector.override(NotSingleton)
+        @Injector.singleton
+        class Fake(NotSingleton):
+            pass
+
+
+def test_override_singleton_requires_override_to_be_singleton(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    with pytest.raises(TypeError, match="above @Injector.singleton"):
+        @Injector.override(MailService)
+        class FakeMailService(MailService):
+            pass
+
+
+def test_second_singleton_override_raises(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class First(MailService):
+        pass
+
+    with pytest.raises(TypeError, match="already overridden"):
+        @Injector.override(MailService)
+        @Injector.singleton
+        class Second(MailService):
+            pass
+
+    assert isinstance(Injector._get_instance(MailService), First)
+
+
+def test_singleton_override_same_class_twice_is_allowed(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        pass
+
+    Injector.override(MailService)(FakeMailService)
+    assert isinstance(Injector._get_instance(MailService), FakeMailService)
+
+
+def test_reregistered_singleton_override_uses_new_registration(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        pass
+
+    with pytest.warns(RuntimeWarning):
+        Injector.singleton(FakeMailService)
+    fresh = Injector._singletons_available[FakeMailService]
+    assert Injector._get_instance(MailService) is fresh.get_instance()
+
+
+def test_override_singleton_after_injection_is_rejected(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    Injector._get_instance(MailService)
+
+    with pytest.raises(SingletonFrozenError):
+        @Injector.override(MailService)
+        @Injector.singleton
+        class FakeMailService(MailService):
+            pass
+
+    assert type(Injector._get_instance(MailService)) is MailService
+
+
+def test_override_singleton_after_reading_singletons_is_rejected(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    @Injector.singleton
+    class FakeMailService(MailService):
+        pass
+
+    Injector.singletons
+    with pytest.raises(SingletonFrozenError):
+        Injector.override(MailService)(FakeMailService)
+
+
+def test_singleton_overrides_are_transitive(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        pass
+
+    @Injector.override(FakeMailService)
+    @Injector.singleton
+    class FakerMailService(FakeMailService):
+        pass
+
+    instance = Injector._get_instance(MailService)
+    assert type(instance) is FakerMailService
+    assert Injector._get_instance(FakeMailService) is instance
+
+
+def test_overridden_interface_implementation_follows_override(reset_injector):
+    from abc import ABC, abstractmethod
+
+    @Injector.interface
+    class Mailer(ABC):
+        @abstractmethod
+        def send(self):
+            pass
+
+    @Injector.implements(Mailer)
+    @Injector.singleton
+    class MailService(Mailer):
+        def send(self):
+            return "sent"
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        def send(self):
+            return "faked"
+
+    assert Injector._get_instance(Mailer) is Injector._get_instance(FakeMailService)
+
+
+def test_injecting_interface_freezes_its_implementation(reset_injector):
+    from abc import ABC, abstractmethod
+
+    @Injector.interface
+    class Mailer(ABC):
+        @abstractmethod
+        def send(self):
+            pass
+
+    @Injector.implements(Mailer)
+    @Injector.singleton
+    class MailService(Mailer):
+        def send(self):
+            return "sent"
+
+    Injector._get_instance(Mailer)
+    with pytest.raises(SingletonFrozenError):
+        @Injector.override(MailService)
+        @Injector.singleton
+        class FakeMailService(MailService):
+            pass
+
+
+def test_override_interface_and_singleton_at_once(reset_injector):
+    from abc import ABC, abstractmethod
+
+    @Injector.interface
+    class Mailer(ABC):
+        @abstractmethod
+        def send(self):
+            pass
+
+    @Injector.singleton
+    class MailService(Mailer):
+        def send(self):
+            return "sent"
+
+    @Injector.override(Mailer, MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        pass
+
+    fake = Injector._get_instance(FakeMailService)
+    assert Injector._get_instance(Mailer) is fake
+    assert Injector._get_instance(MailService) is fake
+
+
+def test_override_singleton_all_or_nothing(reset_injector):
+    @Injector.singleton
+    class A:
+        pass
+
+    @Injector.singleton
+    class B:
+        pass
+
+    Injector._get_instance(B)
+
+    with pytest.raises(SingletonFrozenError):
+        @Injector.override(A, B)
+        @Injector.singleton
+        class Fake(A, B):
+            pass
+
+    assert type(Injector._get_instance(A)) is A

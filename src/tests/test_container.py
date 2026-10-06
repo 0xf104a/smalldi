@@ -100,3 +100,39 @@ def test_component_raises_if_not_singleton_at_decoration_time(reset_injector):
 
     with pytest.raises(TypeError, match="Injector must be a singleton to use components"):
         MyContainer.component()(fn)
+
+def test_overridden_container_receives_components(reset_injector):
+    @Injector.singleton
+    class MyContainer(Container):
+        pass
+
+    @Injector.override(MyContainer)
+    @Injector.singleton
+    class FakeContainer(MyContainer):
+        pass
+
+    @MyContainer.component
+    def fn():
+        pass
+
+    fake = Injector.singletons[FakeContainer]
+    assert [r.component for r in fake.components] == [fn]
+    assert Injector.singletons[MyContainer] is fake
+
+
+def test_container_with_components_cannot_be_overridden(reset_injector):
+    from smalldi import SingletonFrozenError
+
+    @Injector.singleton
+    class MyContainer(Container):
+        pass
+
+    @MyContainer.component
+    def fn():
+        pass
+
+    with pytest.raises(SingletonFrozenError):
+        @Injector.override(MyContainer)
+        @Injector.singleton
+        class FakeContainer(MyContainer):
+            pass

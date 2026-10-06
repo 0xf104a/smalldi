@@ -106,7 +106,7 @@ DI container inside the library. Injector provides these decorators:
 * `@Injector.singleton` registers a class whose instance may further be injected in functions
 * `@Injector.interface` marks an abstract class as an [interface](#interfaces) singletons may implement
 * `@Injector.implements(...)` declares which interfaces a singleton implements
-* `@Injector.override(...)` makes a singleton injected for interfaces instead of their implementation
+* `@Injector.override(...)` makes a singleton injected instead of interfaces' implementations or other singletons
 * `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` (or `Provide[Interface]`) with actual
   instances of Singleton. Every `Provide[]` dependency must already be registered when the function is decorated,
   otherwise `TypeError` is raised.
@@ -171,28 +171,45 @@ Rules:
 * Registering an interface twice emits a `RuntimeWarning`, like singletons do. Registering the same class again drops
   its implementation and override, which must then be declared again.
 
-### Overriding interfaces
-`@Injector.override` makes another singleton injected for an interface instead of its implementation, for example
-to swap in a fake in tests or a platform-specific implementation. Like `@Injector.implements`, apply it above
-`@Injector.singleton`:
+### Overrides
+`@Injector.override` makes another singleton injected instead of an interface's implementation or instead of another
+singleton, for example to swap in a fake in tests or a platform-specific implementation. Like `@Injector.implements`,
+apply it above `@Injector.singleton`:
 ```python
-@Injector.override(Storage)
+@Injector.override(Storage)       # an interface
 @Injector.singleton
 class MemoryStorage(Storage):
     def save(self, data: str):
         self.saved = data
+
+@Injector.override(MeowService)   # a singleton
+@Injector.singleton
+class QuietMeowService(MeowService):
+    def meow(self):
+        pass
 ```
-`Provide[Storage]` then receives the `MemoryStorage` instance. Rules:
-* The override wins whatever the import order: it may be declared before or after `@Injector.implements`, and an
-  implementation declared later doesn't replace it. An interface with only an override is injectable too.
-* Each interface may have only one override, so it is unambiguous which singleton gets injected: a second override
-  with another class raises `TypeError`. Declaring the same class again (e.g. after a reload) is allowed.
-* An interface is *frozen* the first time it is injected, or when `Injector.singletons` is read. Overriding a frozen
-  interface raises `SingletonFrozenError`, so declare overrides before anything injects the interface. Injecting the
-  implementation class directly (`Provide[FileStorage]`) doesn't freeze its interfaces.
-* The implementation stays registered, so `Provide[FileStorage]` still receives a `FileStorage`.
-* Several interfaces may be overridden at once: `@Injector.override(Storage, Cache)`. If any of them can't be
+`Provide[Storage]` then receives the `MemoryStorage` instance and `Provide[MeowService]` the `QuietMeowService`
+instance: the same objects `Provide[MemoryStorage]` and `Provide[QuietMeowService]` receive. Rules:
+* The overriding class must be a singleton and a subclass of every target; a class can't override itself.
+  Several targets may be overridden at once: `@Injector.override(Storage, FileStorage)`. If any of them can't be
   overridden, none is.
+* An overridden singleton is never instantiated through the injector, and `Injector.singletons` maps it to its
+  override's instance.
+* An interface override wins whatever the import order: it may be declared before or after `@Injector.implements`, and
+  an implementation declared later doesn't replace it. An interface with only an override is injectable too. The
+  implementation stays registered, so `Provide[FileStorage]` still receives a `FileStorage`, unless `FileStorage` is
+  overridden as well.
+* Overrides are followed transitively: if `QuietMeowService` is overridden too, `Provide[MeowService]` receives the
+  last override's instance. An interface whose implementation is overridden resolves to that override as well.
+* Each interface or singleton may have only one override, so it is unambiguous what gets injected: a second override
+  with another class raises `TypeError`. Declaring the same class again (e.g. after a reload) is allowed.
+* Targets are *frozen* once injected, and overriding a frozen target raises `SingletonFrozenError`:
+  * an interface the first time `Provide[Interface]` is resolved, or when `Injector.singletons` is read. Injecting
+    the implementation class directly (`Provide[FileStorage]`) doesn't freeze its interfaces;
+  * a singleton once its instance is created: by injecting it (directly or through an interface it implements), by
+    reading `Injector.singletons`, or, for containers, by registering the first component.
+
+  So declare overrides before anything injects their targets.
 
 `SingletonFrozenError` can be imported from `smalldi`.
 
@@ -207,6 +224,10 @@ All containers must be singletons inherited from `Container` class.
 To create a container, write and inheritor of `Container` class and annotate it with `@Injector.singleton`.
 Then you may register components in the container by annotating them with `@MyContainer.component`.
 Additionally, `@MyContainer.component` may be called with `()` in order to provide metadata about the component.
+
+Registering the first component creates the container instance, so a container can only be
+[overridden](#overrides) before any component is registered in it. Components registered afterwards through
+`@MyContainer.component` go to the overriding container's instance.
 
 ### `Container._get_components`
 The container expose protected method `_get_components` which returns all components registered in the container 

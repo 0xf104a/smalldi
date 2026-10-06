@@ -10,6 +10,7 @@
   and `Provide[Interface]` injects the implementation
 * Add `@Injector.override` to inject another singleton for an interface instead of its implementation, regardless of
   import order; an interface may have one override, declared before it is first injected
+* `@Injector.override` can override singletons too; overrides are followed transitively
 * Export `SingletonFrozenError` from `smalldi`
 * Fix containers with lazy singletons
 
