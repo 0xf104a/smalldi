@@ -119,7 +119,8 @@ Abstract classes can't be singletons.
 
 Singletons are lazy: registering a class doesn't instantiate it. The instance is created, exactly once and in a
 thread-safe way, the first time it is needed, that is when an `@Injector.inject`-decorated function is called.
-Once created, a singleton is *frozen* and can no longer be overridden.
+Once an instance was requested, a singleton is *frozen* and can no longer be [overridden](#overrides), even if
+creating the instance failed.
 
 ### `Injector.singletons`
 `Injector.singletons` is a read-only mapping of every registered singleton class to its instance.
@@ -203,13 +204,16 @@ instance: the same objects `Provide[MemoryStorage]` and `Provide[QuietMeowServic
   last override's instance. An interface whose implementation is overridden resolves to that override as well.
 * Each interface or singleton may have only one override, so it is unambiguous what gets injected: a second override
   with another class raises `TypeError`. Declaring the same class again (e.g. after a reload) is allowed.
-* Targets are *frozen* once injected, and overriding a frozen target raises `SingletonFrozenError`:
+* Targets are *frozen* once an instance was requested through them, even if creating it failed, and overriding a
+  frozen target raises `SingletonFrozenError`:
   * an interface the first time `Provide[Interface]` is resolved, or when `Injector.singletons` is read. Injecting
     the implementation class directly (`Provide[FileStorage]`) doesn't freeze its interfaces;
-  * a singleton once its instance is created: by injecting it (directly or through an interface it implements), by
-    reading `Injector.singletons`, or, for containers, by registering the first component.
+  * a singleton once it is injected (directly, through an interface it implements, or through a singleton it
+    overrides), when `Injector.singletons` is read, or, for containers, when the first component is registered.
 
   So declare overrides before anything injects their targets.
+* Registering the same singleton class object again (which emits a `RuntimeWarning`) keeps its override, and
+  interfaces and overrides bound to it switch to the new registration.
 
 `SingletonFrozenError` can be imported from `smalldi`.
 

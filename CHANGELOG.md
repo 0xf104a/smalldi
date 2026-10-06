@@ -1,7 +1,7 @@
 # Changelog
 ## 0.3.0
 * Singletons are now lazy: they are instantiated on first injection instead of on registration
-* Singletons are frozen once instantiated and can't be overridden afterwards
+* Singletons are frozen once an instance was requested and can't be overridden afterwards
 * Add `Injector.singletons`, a read-only mapping of singleton classes to their instances
 * Deprecate `Injector.singletons_available` in favour of `Injector.singletons`; it is now read-only
 * Registering a singleton twice (e.g. after a module reload) now emits a `RuntimeWarning`

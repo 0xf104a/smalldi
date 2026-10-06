@@ -1,7 +1,7 @@
 import pytest
 
 from smalldi import Injector
-from smalldi._singleton import SingletonFrozenError
+from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.annotation import _Provide
 
 
@@ -43,7 +43,7 @@ def test_singletons_view_freezes_all(reset_injector):
     lazy = Injector._singletons_available[TestService]
     assert lazy.frozen
     with pytest.raises(SingletonFrozenError):
-        lazy.override(Override)
+        lazy.override(LazySingleton(Override))
 
 
 def test_singletons_available_deprecated(reset_injector):
@@ -193,14 +193,15 @@ def test_inject_override_before_first_call(reset_injector):
     class TestService:
         pass
 
-    class Override(TestService):
-        pass
-
     @Injector.inject
     def test_function(service: _Provide[TestService]):
         return service
 
-    Injector._singletons_available[TestService].override(Override)
+    @Injector.override(TestService)
+    @Injector.singleton
+    class Override(TestService):
+        pass
+
     assert type(test_function()) is Override
 
 
@@ -488,3 +489,60 @@ def test_override_singleton_all_or_nothing(reset_injector):
             pass
 
     assert type(Injector._get_instance(A)) is A
+
+
+def test_reregistered_singleton_keeps_its_override(reset_injector):
+    @Injector.singleton
+    class MailService:
+        pass
+
+    @Injector.override(MailService)
+    @Injector.singleton
+    class FakeMailService(MailService):
+        pass
+
+    with pytest.warns(RuntimeWarning):
+        Injector.singleton(MailService)
+    assert isinstance(Injector._get_instance(MailService), FakeMailService)
+
+
+def test_override_while_constructor_injects_doesnt_deadlock(reset_injector):
+    """A constructor holding its build lock may take the registry lock while override() holds it"""
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    @Injector.singleton
+    class Dependency:
+        pass
+
+    @Injector.singleton
+    class Other:
+        pass
+
+    @Injector.singleton
+    class Slow:
+        def __init__(self):
+            entered.set()
+            release.wait(1)
+            self.dependency = Injector._get_instance(Dependency)
+
+    worker = threading.Thread(target=Injector._get_instance, args=(Slow,))
+    worker.start()
+    assert entered.wait(1)
+
+    def override_other():
+        @Injector.override(Other)
+        @Injector.singleton
+        class FakeOther(Other):
+            pass
+
+    overrider = threading.Thread(target=override_other)
+    overrider.start()
+    overrider.join(1)
+    assert not overrider.is_alive()
+
+    release.set()
+    worker.join(1)
+    assert not worker.is_alive()
