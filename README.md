@@ -103,13 +103,29 @@ if __name__ == '__main__':
 ## Injector
 Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
 DI container inside the library. Injector provides two decorators:
-* `@Injector.singleton` creates an instance of a class which may further be injected in functions
-* `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton
+* `@Injector.singleton` registers a class whose instance may further be injected in functions
+* `@Injector.inject` replaces parameters annotated with type `Provide[Singleton]` with actual instances of Singleton.
+  Every `Provide[]` dependency must already be registered when the function is decorated, otherwise `TypeError` is raised.
 
 ### Singletons
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
 than annotated with `Provide[]` type. Only singletons may be decorated with `@Injector.singleton`. As a consequence, 
-only singleton classes may be injected at the current state of library development.
+only singleton classes may be injected at the current state of library development. Abstract classes can't be singletons.
+
+Singletons are lazy: registering a class doesn't instantiate it. The instance is created, exactly once and in a
+thread-safe way, the first time it is needed, that is when an `@Injector.inject`-decorated function is called.
+Once created, a singleton is *frozen* and can no longer be overridden.
+
+### `Injector.singletons`
+`Injector.singletons` is a read-only mapping of every registered singleton class to its instance.
+Reading it creates every singleton that doesn't exist yet, so it freezes the whole registry.
+`Injector.singletons_available` is a deprecated alias for it.
+
+> [!WARNING]
+> Registering the same class (or a class with the same module and qualified name, as happens after
+> `importlib.reload`) twice emits a `RuntimeWarning` and replaces the registration. Instances which were
+> already injected aren't replaced, so several instances of a "singleton" may coexist. DI is normally
+> set up once per process; reload modules at your own risk.
 
 ## Provide
 `Provide[T]` is an annotation for injector telling it that instead of this argument
@@ -137,6 +153,32 @@ consists of:
 * `component`: an actual component type
 * `args`: arguments passed to `@MyContainer.component` during registration
 * `kwargs`: keyword arguments passed to `@MyContainer.component` during registration
+
+## Concurrency
+`smalldi.concurrency` provides two decorators for serializing calls between threads:
+* `@synchronized` guards a function with its own reentrant lock, shared by every caller.
+* `@threadsafe` picks the lock from where the method is defined:
+  * instance methods lock per instance,
+  * `@classmethod`s lock per class (subclasses get their own lock),
+  * `@staticmethod`s lock per function, like `@synchronized`.
+
+  Applied outside a class body, it warns and falls back to `@synchronized`.
+
+### Limitations
+* Async functions (`async def` and async generators) aren't supported yet: decorating one raises `NotImplementedError`.
+* Plain generator functions are accepted, but the lock is held only while the generator object is created,
+  not while it is iterated. Don't rely on either decorator to protect a generator's body.
+* `@threadsafe` stores the instance lock as `__instance_mutex__` in the object's `__dict__` the first time
+  a guarded method runs. Classes using `__slots__` must list `__instance_mutex__` in their slots.
+* Once that lock exists, the object can't be pickled or deep-copied (`TypeError: cannot pickle '_thread.RLock' object`),
+  and `copy.copy` makes the copy share the original's lock. If you need copying, drop the lock from the state,
+  and a fresh one is created on the next call:
+  ```python
+  def __getstate__(self):
+      state = self.__dict__.copy()
+      state.pop("__instance_mutex__", None)
+      return state
+  ```
 
 ## Collector
 `Collector` is a class which imports all modules in order execute decorators.
