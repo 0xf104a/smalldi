@@ -140,7 +140,7 @@ class Injector(metaclass=_InjectorMeta):
             return singleton
         if cls._interface_resolver.is_interface(tp):
             return cls._interface_resolver.resolve(tp)
-        raise TypeError(f"Singleton {tp} is not available")
+        raise TypeError(f"Singleton {tp.__name__} is not available")
 
     @classmethod
     def _get_instance(cls, tp: type) -> Any:
@@ -193,9 +193,9 @@ class Injector(metaclass=_InjectorMeta):
 
         @functools.wraps(fn)
         def wrapped_fn(*args, **kwargs):
-            for name, tp in name2type.items():
-                if name not in kwargs:
-                    kwargs[name] = cls._get_instance(tp)
+            for argname, _tp in name2type.items():
+                if argname not in kwargs:
+                    kwargs[argname] = cls._get_instance(_tp)
             return fn(*args, **kwargs)
         return wrapped_fn
 
@@ -402,14 +402,14 @@ class Injector(metaclass=_InjectorMeta):
         singleton = cls._singletons_available.get(target_cls)
         if singleton is None:
             raise TypeError(
-                f"Class {target_cls} is not a singleton; "
+                f"Class {target_cls.__name__} is not a singleton; "
                 f"apply @Injector.{decorator} above @Injector.singleton"
             )
         for target in targets:
             if cls._interface_resolver.is_interface(target):
                 continue
             if not allow_singletons:
-                raise TypeError(f"Class {target} is not an interface")
+                raise TypeError(f"Class {target.__name__} is not an interface")
             if target not in cls._singletons_available:
-                raise TypeError(f"Class {target} is neither an interface nor a singleton")
+                raise TypeError(f"Class {target.__name__} is neither an interface nor a singleton")
         return singleton
