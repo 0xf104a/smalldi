@@ -145,17 +145,17 @@ from smalldi import Injector, Provide
 @Injector.interface
 class Storage(ABC):
     @abstractmethod
-    def save(self, data: str): ...
+    def store(self, something: str): ...
 
 @Injector.implements(Storage)
 @Injector.singleton
-class FileStorage(Storage):
-    def save(self, data: str):
-        print(f"Saving {data}")
+class StorageImpl(Storage):
+    def store(self, something: str):
+        print(f"Saving {something}")
 
 @Injector.inject
 def main(storage: Provide[Storage]):
-    storage.save("meow")  # FileStorage instance
+    storage.store("fish")  # FileStorage instance
 ```
 Rules:
 * Each interface has at most one implementation; declaring a second one raises `TypeError`. A singleton may implement
@@ -179,15 +179,16 @@ apply it above `@Injector.singleton`:
 ```python
 @Injector.override(Storage)       # an interface
 @Injector.singleton
-class MemoryStorage(Storage):
-    def save(self, data: str):
-        self.saved = data
+class MilkStorage(Storage):
+    def store(self, something: str):
+        if "milk" not in something:
+          raise ValueError("Only milk is allowed to this storage")
 
 @Injector.override(MeowService)   # a singleton
 @Injector.singleton
-class QuietMeowService(MeowService):
+class LoudMeowService(MeowService):
     def meow(self):
-        pass
+        print("MEOW-MEOW-MEOW! MeOW! MEoW! MEEEOW!!!")
 ```
 `Provide[Storage]` then receives the `MemoryStorage` instance and `Provide[MeowService]` the `QuietMeowService`
 instance: the same objects `Provide[MemoryStorage]` and `Provide[QuietMeowService]` receive. Rules:
