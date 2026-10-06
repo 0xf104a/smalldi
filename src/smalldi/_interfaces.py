@@ -35,13 +35,13 @@ class LazyInterfaceImpl:
         :raises TypeError: if `interface` isn't abstract
         """
         if not isabstract(interface):
-            raise TypeError(f"Interface {interface!r} is not abstract")
+            raise TypeError(f"Interface {interface.__name__!r} is not abstract")
         self.interface = interface
         self._implementation: LazySingleton | None = None
         self._singleton = LazySingleton(interface, factory=self._implementation_instance)
 
     def __repr__(self) -> str:
-        return f"<LazyInterfaceImpl of {self.interface!r}>"
+        return f"<LazyInterfaceImpl of {self.interface.__name__!r}>"
 
     def _implementation_instance(self) -> Any:
         """
@@ -91,7 +91,7 @@ class LazyInterfaceImpl:
         :raises NotImplementedError: if the interface is neither implemented nor overridden
         """
         if not self.resolvable:
-            raise NotImplementedError(f"Interface {self.interface!r} is not implemented")
+            raise NotImplementedError(f"Interface {self.interface.__name__!r} is not implemented")
         return self._singleton.get_instance()
 
     def check_implementation(self, implementation: LazySingleton):
@@ -106,17 +106,17 @@ class LazyInterfaceImpl:
         """
         with _bindings_lock:
             if not issubclass(implementation.cls, self.interface):
-                raise TypeError(f"Class {implementation.cls} is not a subclass of {self.interface}")
+                raise TypeError(f"Class {implementation.cls.__name__} is not a subclass of {self.interface.__name__}")
             if implementation is self._implementation:
                 return
             if self._implementation is not None:
                 if self.frozen:
                     raise SingletonFrozenError(
-                        f"Interface {self.interface} was already injected "
+                        f"Interface {self.interface.__name__} was already injected "
                         f"and its implementation cannot be changed"
                     )
                 raise TypeError(
-                    f"Interface {self.interface} is already implemented by {self._implementation.cls}; "
+                    f"Interface {self.interface.__name__} is already implemented by {self._implementation.cls.__name__}; "
                     f"use @Injector.override to replace it"
                 )
 
@@ -174,7 +174,7 @@ class InterfaceResolver:
         :raises TypeError: if `interface` isn't registered
         """
         if interface not in self._interfaces:
-            raise TypeError(f"Interface {interface!r} is not registered")
+            raise TypeError(f"Interface {interface.__name__!r} is not registered")
         return self._interfaces[interface]
 
     def is_interface(self, interface: type) -> bool:

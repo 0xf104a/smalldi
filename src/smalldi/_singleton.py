@@ -65,7 +65,7 @@ class LazySingleton:
         self._build_lock = threading.RLock()
 
     def __repr__(self) -> str:
-        return f"<LazySingleton of {self.cls!r}>"
+        return f"<LazySingleton of {self.cls.__name__!r}>"
 
     @property
     def override_singleton(self) -> "LazySingleton | None":
@@ -114,19 +114,19 @@ class LazySingleton:
         """
         with _bindings_lock:
             if override is self or override.cls is self.cls:
-                raise TypeError(f"Class {self.cls} cannot override itself")
+                raise TypeError(f"Class {self.cls.__name__} cannot override itself")
             if not issubclass(override.cls, self.cls):
-                raise TypeError(f"Class {override.cls} is not a subclass of {self.cls}")
+                raise TypeError(f"Class {override.cls.__name__} is not a subclass of {self.cls.__name__}")
             if override is self._override:
                 return
             if self._frozen:
                 raise SingletonFrozenError(
-                    f"{self.cls} was already injected and cannot be overridden"
+                    f"{self.cls.__name__} was already injected and cannot be overridden"
                 )
             if self._override is not None:
-                raise TypeError(f"{self.cls} is already overridden by {self._override.cls}")
+                raise TypeError(f"{self.cls.__name__} is already overridden by {self._override.cls.__name__}")
             if override._overrides_chain_to(self):
-                raise TypeError(f"Overriding {self.cls} with {override.cls} would form a cycle")
+                raise TypeError(f"Overriding {self.cls.__name__} with {override.cls.__name__} would form a cycle")
 
     def override(self, override: "LazySingleton"):
         """
