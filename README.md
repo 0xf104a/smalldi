@@ -139,11 +139,11 @@ To create a container, write and inheritor of `Container` class and annotate it 
 Then you may register components in the container by annotating them with `@MyContainer.component`.
 Additionally, `@MyContainer.component` may be called with `()` in order to provide metadata about the component.
 
-## `Container._get_components`
+### `Container._get_components`
 The container expose protected method `_get_components` which returns all components registered in the container 
 in form of iterable of [registrations](#ComponentRegistration).
 
-## `Container._on_component_registered`
+### `Container._on_component_registered`
 The container have protected method `_on_component_registered` which is called every time a new component is registered
 in the container.
 
