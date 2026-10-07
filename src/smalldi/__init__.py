@@ -143,6 +143,8 @@ class Injector:
     def _override_interface(cls, interface):
         @mutex(cls.__class_mutex__)
         def wrapper(new_impl):
+            if not cls.is_singleton(new_impl):
+                raise TypeError(f"Class {new_impl} is not a singleton and cannot be overridden")
             cls._interface_resolver.override(interface, new_impl)
             return new_impl
         return wrapper
@@ -174,7 +176,7 @@ class Injector:
 
     @threadsafe
     @classmethod
-    def isinterface(cls, tp: type) -> bool:
+    def is_interface(cls, tp: type) -> bool:
         return cls._interface_resolver.is_interface(tp)
 
     @threadsafe

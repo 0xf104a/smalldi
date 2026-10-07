@@ -58,15 +58,6 @@ class LazySingleton:
     def _name(self) -> str:
         return getattr(self._cls, "__name__", repr(self._cls))
 
-    @property
-    @threadsafe
-    def frozen(self) -> bool:
-        """
-        Whether an instance was already requested, so the singleton can no
-        longer be overridden.
-        """
-        return self._frozen
-
     @threadsafe
     def get_instance(self) -> Any:
         """
@@ -152,7 +143,7 @@ class LazySingleton:
     def set_base(self, implementation_cls):
         if self._frozen:
             raise SingletonFrozenError(f"Singleton {self._name} was already frozen")
-        if self._cls:
+        if self._cls is not None:
             raise TypeError(f"Singleton {self._name} can not change its base implementation")
         self._cls = implementation_cls
 
