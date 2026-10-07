@@ -121,15 +121,20 @@ class Injector:
     def _override_singleton(cls, source_cls):
         @mutex(cls.__class_mutex__)
         def wrapper(new_cls):
-            if source_cls is new_cls:
-                raise TypeError(f"Class {source_cls} can not override itself")
             if source_cls not in cls._singletons_available:
-                raise TypeError(f"Class {source_cls} is not a known singleton. You must override an existing singleton.")
+                raise TypeError(
+                    f"Class {source_cls.__name__} is not a known singleton. "
+                    f"You must override an existing singleton."
+                )
+            if new_cls not in cls._singletons_available:
+                raise TypeError(
+                    f"Class {new_cls.__name__} is not a singleton: "
+                    f"apply @Injector.override above @Injector.singleton"
+                )
             if not issubclass(new_cls, source_cls):
-                raise TypeError(f"{new_cls!r} is not a subclass of {source_cls!r}")
-            singleton = cls._singletons_available[source_cls]
-            singleton.override(new_cls)
-            cls._singletons_available[new_cls] = singleton
+                raise TypeError(f"{new_cls.__name__} is not a subclass of {source_cls.__name__}")
+            target = cls._singletons_available[source_cls]
+            target.delegate_to(cls._singletons_available[new_cls])
             return new_cls
         return wrapper
 
