@@ -56,12 +56,11 @@ class Container:
         :param kwargs: metadata keyword arguments passed to the component decorator
         :raises TypeError: if the container isn't a registered singleton or `component` is None
         """
-        with Injector._registry_lock:
-            if cls not in Injector._singletons_available:
-                raise TypeError(f"Injector must be a singleton to use components")
+        if not Injector.is_singleton(cls):
+            raise TypeError(f"Injector must be a singleton to use components")
         if component is None:
             raise TypeError("Component cannot be None")
-        this = Injector._get_instance(cls)
+        this = Injector.get_instance(cls)
         this.components.append(ComponentRegistration(component, args, kwargs))
         this._on_component_register(ComponentRegistration(component, args, kwargs))
 

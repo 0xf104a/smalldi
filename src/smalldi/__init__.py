@@ -1,14 +1,13 @@
 import functools
 import threading
-from contextlib import AbstractContextManager
 from inspect import isabstract
 from typing import Any
 
-from smalldi._interfaces import InterfaceResolver, LazyInterfaceImpl
-from smalldi._singleton import LazySingleton, SingletonFrozenError, atomic
+from smalldi._interfaces import InterfaceResolver
+from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.annotation import _Provide, Provide
 from smalldi.concurrency import threadsafe, mutex
-from smalldi.decorator import staticclass, placeholder
+from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
@@ -51,7 +50,7 @@ class Injector:
 
     @threadsafe
     @classmethod
-    def _get_instance(cls, tp: type) -> Any:
+    def get_instance(cls, tp: type) -> Any:
         """
         Returns the instance to inject for a registered singleton or interface,
         following overrides and implementations, creating it if needed.
@@ -103,7 +102,7 @@ class Injector:
         def wrapped_fn(*args, **kwargs):
             for argname, _tp in name2type.items():
                 if argname not in kwargs:
-                    kwargs[argname] = cls._get_instance(_tp)
+                    kwargs[argname] = cls.get_instance(_tp)
             return fn(*args, **kwargs)
         return wrapped_fn
 
@@ -170,3 +169,8 @@ class Injector:
     @classmethod
     def isinterface(cls, tp: type) -> bool:
         return cls._interface_resolver.is_interface(tp)
+
+    @threadsafe
+    @classmethod
+    def is_singleton(cls, target: type) -> bool:
+        return target in cls._singletons_available

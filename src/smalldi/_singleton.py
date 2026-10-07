@@ -48,7 +48,7 @@ class LazySingleton:
         self._override: Type[cls] | None = override
         self._instance: Any = None
         self._frozen = False
-        self._threads = AtomicSet[int]()
+        self._threads = AtomicSet()
 
     def __repr__(self) -> str:
         return f"<LazySingleton of {self._cls}>"
@@ -95,7 +95,7 @@ class LazySingleton:
     @threadsafe
     def override(self, new: Type):
         if self._frozen:
-            raise RuntimeError(f"Singleton {self._cls.__name__} was already frozen")
+            raise SingletonFrozenError(f"Singleton {self._cls.__name__} was already frozen")
         if self._override is not None:
             raise RuntimeError(f"Singleton {self._cls.__name__} was already overridden")
         self._override = new
