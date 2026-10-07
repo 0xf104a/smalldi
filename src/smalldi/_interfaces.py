@@ -49,10 +49,10 @@ class _LazyInterfaceImpl:
 
     @threadsafe
     def get_impl(self) -> Any:
+        self._frozen = True
         target = self._override if self._override is not None else self._implementation
         if target is None:
             raise RuntimeError(f"Interface {self.interface.__name__!r} is not implemented")
-        self._frozen = True
         return target.get_instance()
 
 class InterfaceResolver:

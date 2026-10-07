@@ -50,6 +50,7 @@ class LazySingleton:
         self._instance: Any = None
         self._frozen = False
         self._threads = AtomicSet()
+        self.__instance_mutex__ = threading.RLock()
 
     def __repr__(self) -> str:
         return f"<LazySingleton of {self._cls}>"
@@ -58,7 +59,6 @@ class LazySingleton:
     def _name(self) -> str:
         return getattr(self._cls, "__name__", repr(self._cls))
 
-    @threadsafe
     def get_instance(self) -> Any:
         """
         Returns the instance: the overriding singleton's if overridden,
@@ -66,26 +66,27 @@ class LazySingleton:
 
         :return: the instance
         """
-        self._frozen = True
-        if self._delegate is not None:
-            return self._delegate.get_instance()
-        ident = threading.current_thread().ident
-        if ident is None:
-            raise RuntimeError("Can not identify thread")
-        was_in_our_path = self._threads.check_and_add(ident)
-        if was_in_our_path:
-            raise RuntimeError(
-                f"Singleton {self._name} re-entered itself during instantiation: likely circular dependency")
-        if self._instance is None:
-            try:
-                if self._override is not None:
-                    self._instance = self._override()
-                else:
-                    self._instance = self._cls()
-            except BaseException:
-                self._threads.remove(ident)
-                raise
-        self._threads.remove(ident)
+        with self.__instance_mutex__:
+            self._frozen = True
+            if self._delegate is not None:
+                return self._delegate.get_instance()
+            ident = threading.current_thread().ident
+            if ident is None:
+                raise RuntimeError("Can not identify thread")
+            was_in_our_path = self._threads.check_and_add(ident)
+            if was_in_our_path:
+                raise RuntimeError(
+                    f"Singleton {self._name} re-entered itself during instantiation: likely circular dependency")
+            if self._instance is None:
+                try:
+                    if self._override is not None:
+                        self._instance = self._override()
+                    else:
+                        self._instance = self._cls()
+                except BaseException:
+                    self._threads.remove(ident)
+                    raise
+            self._threads.remove(ident)
         return self._instance
 
     @threadsafe
