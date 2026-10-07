@@ -150,6 +150,10 @@ class LazySingleton:
 
     @threadsafe
     def set_base(self, implementation_cls):
+        if self._frozen:
+            raise SingletonFrozenError(f"Singleton {self._name} was already frozen")
+        if self._cls:
+            raise TypeError(f"Singleton {self._name} can not change its base implementation")
         self._cls = implementation_cls
 
     @property
