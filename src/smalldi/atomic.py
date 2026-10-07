@@ -31,5 +31,5 @@ class AtomicSet:
         self.value.add(value)
 
     @threadsafe
-    def remove(self, value: T) -> None:
+    def remove(self, value: _T) -> None:
         self.value.remove(value)
