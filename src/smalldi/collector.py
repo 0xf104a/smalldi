@@ -1,7 +1,7 @@
 import importlib
 import pkgutil
 
-from smalldi.wrappers import staticclass
+from smalldi.utils import staticclass
 
 
 @staticclass

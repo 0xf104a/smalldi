@@ -57,7 +57,7 @@ def test_factory_replaces_class_construction():
     assert singleton.get_instance() == "built"
     assert singleton.get_instance() == "built"
     assert calls == [1]
-    assert singleton.cls is Base
+    assert singleton._cls is Base
 
 
 def test_factory_is_skipped_when_overridden():

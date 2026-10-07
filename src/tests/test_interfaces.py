@@ -490,7 +490,7 @@ def test_override_before_implementation_wins(reset_injector):
     MemoryStorage = make_memory_storage(Storage)
 
     assert isinstance(fn(), FakeStorage)
-    assert Injector._interface_resolver.resolve(Storage).implementation.cls is MemoryStorage
+    assert Injector._interface_resolver.resolve(Storage).implementation._cls is MemoryStorage
 
 
 def test_override_without_implementation_is_injected(reset_injector):

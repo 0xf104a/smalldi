@@ -2,8 +2,10 @@
 Lazily instantiated singletons used by `Injector` to store registered classes.
 """
 import threading
-from contextlib import AbstractContextManager
-from typing import Any, Callable, Type
+from typing import Any, Type
+
+from smalldi.atomic import AtomicSet
+from smalldi.concurrency import threadsafe
 
 
 class SingletonFrozenError(Exception):
@@ -11,24 +13,7 @@ class SingletonFrozenError(Exception):
     Raised on an attempt to override a singleton or an interface which was
     already injected (frozen).
     """
-
-
-# Guards the bindings (overrides, implementations, frozen flags) of every
-# singleton and interface; `Injector` uses it for its registry too. Held only
-# briefly, never while an instance is being created, so constructors may
-# freely use the injector.
-_bindings_lock = threading.RLock()
-
-
-def atomic() -> AbstractContextManager:
-    """
-    Returns the lock guarding the bindings of all singletons and interfaces,
-    to check and change several of them without another thread freezing or
-    rebinding one in between. Reentrant. Don't create instances while holding it.
-
-    :return: context manager holding the lock
-    """
-    return _bindings_lock
+    pass
 
 
 class LazySingleton:
@@ -50,31 +35,26 @@ class LazySingleton:
     only briefly. Instance creation is guarded by a separate per-singleton
     lock, so concurrent first calls create exactly one instance.
 
-    :ivar cls: the registered class
+    :ivar _cls: the registered class
     """
-    def __init__(self, cls: Type, factory: Callable[[], Any] | None = None):
+
+    # _cls may None for interfaces, e.g. only override was imported
+    def __init__(self, cls: Type | None, override: Type | None = None):
         """
         :param cls: registered class to create the instance of
-        :param factory: called instead of `cls` to create the instance, if given
+        :param factory: called instead of `_cls` to create the instance, if given
         """
-        self.cls = cls
-        self._factory = factory if factory is not None else cls
-        self._override: LazySingleton | None = None
+        self._cls = cls
+        self._override: Type[cls] | None = override
         self._instance: Any = None
         self._frozen = False
-        self._build_lock = threading.RLock()
+        self._threads = AtomicSet[int]()
 
     def __repr__(self) -> str:
-        return f"<LazySingleton of {self.cls.__name__!r}>"
+        return f"<LazySingleton of {self._cls}>"
 
     @property
-    def override_singleton(self) -> "LazySingleton | None":
-        """
-        The singleton injected instead of this one, or None if not overridden.
-        """
-        return self._override
-
-    @property
+    @threadsafe
     def frozen(self) -> bool:
         """
         Whether an instance was already requested, so the singleton can no
@@ -82,6 +62,7 @@ class LazySingleton:
         """
         return self._frozen
 
+    @threadsafe
     def get_instance(self) -> Any:
         """
         Returns the instance: the override's if set, otherwise its own,
@@ -91,67 +72,44 @@ class LazySingleton:
 
         :return: the instance
         """
-        with _bindings_lock:
-            override = self._override
-            self._frozen = True
-        if override is not None:
-            return override.get_instance()
-        with self._build_lock:
-            if self._instance is None:
-                self._instance = self._factory()
-            return self._instance
+        ident = threading.current_thread().ident
+        if ident is None:
+            raise RuntimeError("Can not identify thread")
+        was_in_our_path = self._threads.check_and_add(ident)
+        if was_in_our_path:
+            raise RuntimeError(
+                f"Singleton {self._cls.__name__} re-entered itself during instantiation: likely circular dependency")
+        self._frozen = True
+        if self._instance is None:
+            try:
+                if self._override is not None:
+                    self._instance = self._override()
+                else:
+                    self._instance = self._cls()
+            except BaseException:
+                self._threads.remove(ident)
+                raise
+        self._threads.remove(ident)
+        return self._instance
 
-    def check_override(self, override: "LazySingleton"):
-        """
-        Checks that `override()` would succeed, without changing anything.
-        Repeating the current override is a no-op and always passes.
+    @threadsafe
+    def override(self, new: Type):
+        if self._frozen:
+            raise RuntimeError(f"Singleton {self._cls.__name__} was already frozen")
+        if self._override is not None:
+            raise RuntimeError(f"Singleton {self._cls.__name__} was already overridden")
+        self._override = new
 
-        :param override: singleton to inject instead of this one
-        :raises TypeError: if `override` is this singleton, its class isn't a
-            subclass of `cls`, another override is already set, or the
-            override would form a cycle
-        :raises SingletonFrozenError: if this singleton is frozen
-        """
-        with _bindings_lock:
-            if override is self or override.cls is self.cls:
-                raise TypeError(f"Class {self.cls.__name__} cannot override itself")
-            if not issubclass(override.cls, self.cls):
-                raise TypeError(f"Class {override.cls.__name__} is not a subclass of {self.cls.__name__}")
-            if override is self._override:
-                return
-            if self._frozen:
-                raise SingletonFrozenError(
-                    f"{self.cls.__name__} was already injected and cannot be overridden"
-                )
-            if self._override is not None:
-                raise TypeError(f"{self.cls.__name__} is already overridden by {self._override.cls.__name__}")
-            if override._overrides_chain_to(self):
-                raise TypeError(f"Overriding {self.cls.__name__} with {override.cls.__name__} would form a cycle")
+    @property
+    @threadsafe
+    def override_cls(self) -> Type | None:
+        return self._override
 
-    def override(self, override: "LazySingleton"):
-        """
-        Makes `get_instance()` return the instance of `override` instead.
-        Repeating the current override is a no-op.
+    @property
+    @threadsafe
+    def implementation_cls(self) -> Type | None:
+        return self._override
 
-        :param override: singleton to inject instead of this one
-        :raises TypeError: see `check_override`
-        :raises SingletonFrozenError: see `check_override`
-        """
-        with _bindings_lock:
-            self.check_override(override)
-            self._override = override
-
-    def _overrides_chain_to(self, target: "LazySingleton") -> bool:
-        """
-        Whether `get_instance()` would reach `target` through overrides.
-        Must be called while holding the bindings lock.
-
-        :param target: singleton to look for
-        :return: True if `target` is this singleton or one it delegates to
-        """
-        current: LazySingleton | None = self
-        while current is not None:
-            if current is target:
-                return True
-            current = current._override
-        return False
+    @threadsafe
+    def set_base(self, implementation_cls):
+        self._cls = implementation_cls

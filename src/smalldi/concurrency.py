@@ -14,6 +14,7 @@ import functools
 import inspect
 import threading
 import warnings
+from contextlib import AbstractContextManager
 from enum import Enum, auto
 from typing import Any, Callable
 
@@ -200,3 +201,14 @@ def threadsafe(fn: Any) -> Any:
         return instance_wrapper
 
     raise RuntimeError("Unknown function placement")
+
+def mutex(fn_mutex: AbstractContextManager): # makes function to run within mutex
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            with fn_mutex:
+                return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorate
