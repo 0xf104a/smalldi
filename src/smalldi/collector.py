@@ -1,7 +1,7 @@
 import importlib
 import pkgutil
 
-from smalldi.utils import staticclass
+from smalldi.decorator import staticclass
 
 
 @staticclass

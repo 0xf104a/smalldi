@@ -8,7 +8,7 @@ from smalldi._interfaces import InterfaceResolver, LazyInterfaceImpl
 from smalldi._singleton import LazySingleton, SingletonFrozenError, atomic
 from smalldi.annotation import _Provide, Provide
 from smalldi.concurrency import threadsafe, mutex
-from smalldi.utils import staticclass, placeholder
+from smalldi.decorator import staticclass, placeholder
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"

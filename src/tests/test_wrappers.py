@@ -1,6 +1,6 @@
 import pytest
 
-from smalldi.utils import staticclass
+from smalldi.decorator import staticclass
 
 
 def test_staticclass_basic():
