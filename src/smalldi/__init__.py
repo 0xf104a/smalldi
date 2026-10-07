@@ -143,9 +143,12 @@ class Injector:
     def _override_interface(cls, interface):
         @mutex(cls.__class_mutex__)
         def wrapper(new_impl):
-            if not cls.is_singleton(new_impl):
-                raise TypeError(f"Class {new_impl} is not a singleton and cannot be overridden")
-            cls._interface_resolver.override(interface, new_impl)
+            if new_impl not in cls._singletons_available:
+                raise TypeError(
+                    f"Class {new_impl.__name__} is not a singleton: "
+                    f"apply @Injector.override above @Injector.singleton"
+                )
+            cls._interface_resolver.override(interface, new_impl, cls._singletons_available[new_impl])
             return new_impl
         return wrapper
 
@@ -170,7 +173,12 @@ class Injector:
     def implements(cls, what: type):
         @mutex(cls.__class_mutex__)
         def wrapper(impl):
-            cls._interface_resolver.implement(what, impl)
+            if impl not in cls._singletons_available:
+                raise TypeError(
+                    f"Class {impl.__name__} is not a singleton: "
+                    f"apply @Injector.implements above @Injector.singleton"
+                )
+            cls._interface_resolver.implement(what, impl, cls._singletons_available[impl])
             return impl
         return wrapper
 

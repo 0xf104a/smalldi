@@ -4,29 +4,13 @@ Interfaces and the singletons implementing them, used by `Injector`.
 from inspect import isabstract
 from typing import Any, Type
 
-from smalldi._singleton import LazySingleton
+from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.concurrency import threadsafe
 
 
 class _LazyInterfaceImpl:
     """
-    Binding of an interface to the singleton injected for it.
-
-    An interface is an abstract class and is never instantiated itself.
-    `get_instance()` returns the instance of the overriding singleton if the
-    interface is overridden, otherwise the instance of the implementing one.
-    Both are `LazySingleton`s, so the interface shares the instance with its
-    implementation, and an overridden implementation is followed as well.
-
-    Overriding and freezing are plain singleton management, so they are
-    delegated to an inner `LazySingleton` of the interface whose instance is
-    produced by the implementation. This class only adds what is specific to
-    interfaces: abstractness, the implementation slot and `NotImplementedError`
-    for an unbound interface.
-
-    Nothing rebinds a frozen interface, except its first implementation when
-    it is already overridden: the override keeps winning, so the injected
-    instance doesn't change.
+    Binding of an interface to the registry-owned `LazySingleton`s implementing and overriding it.
 
     :ivar interface: the abstract class
     """
@@ -39,32 +23,37 @@ class _LazyInterfaceImpl:
             raise TypeError(f"Interface {interface.__name__!r} is not abstract")
         self.interface = interface
         self._implementation: LazySingleton | None = None
+        self._override: LazySingleton | None = None
+        self._frozen = False
 
     @threadsafe
-    def override(self, override_cls: Type):
-        if not issubclass(override_cls, self.interface):
-            raise TypeError(f"{override_cls!r} is not a subclass of {self.interface!r}")
-        if self._implementation is None:
-            self._implementation = LazySingleton(None, override_cls)
-        elif self._implementation.override_cls is not None:
+    def override(self, target: LazySingleton):
+        if self._frozen:
+            raise SingletonFrozenError(f"Interface {self.interface.__name__!r} was already frozen")
+        if self._override is not None:
             raise TypeError(f"Interface {self.interface.__name__!r} is already overridden")
-        else:
-            self._implementation.override(override_cls)
+        if target is self._implementation:
+            raise TypeError(f"Interface {self.interface.__name__!r} can't be overridden by its own implementation")
+        target._mark_as_override()
+        self._override = target
 
     @threadsafe
-    def implement(self, implementation_cls: Type):
+    def implement(self, target: LazySingleton):
         if self._implementation is not None:
-            if self._implementation.implementation_cls is not None:
-                raise RuntimeError(f"Interface {self.interface.__name__!r} is already implemented")
-            self._implementation.set_base(implementation_cls)
-        else:
-            self._implementation = LazySingleton(implementation_cls, None)
+            raise RuntimeError(f"Interface {self.interface.__name__!r} is already implemented")
+        if target is self._override:
+            raise TypeError(f"Interface {self.interface.__name__!r} can't be implemented by its own override")
+        if self._frozen and self._override is None:
+            raise SingletonFrozenError(f"Interface {self.interface.__name__!r} was already frozen")
+        self._implementation = target
 
     @threadsafe
     def get_impl(self) -> Any:
-        if self._implementation is None:
+        target = self._override if self._override is not None else self._implementation
+        if target is None:
             raise RuntimeError(f"Interface {self.interface.__name__!r} is not implemented")
-        return self._implementation.get_instance()
+        self._frozen = True
+        return target.get_instance()
 
 class InterfaceResolver:
     """
@@ -112,17 +101,17 @@ class InterfaceResolver:
         self._interfaces[interface] = _LazyInterfaceImpl(interface)
 
     @threadsafe
-    def override(self, interface: Type, new_impl: Type):
+    def override(self, interface: Type, new_impl: Type, target: LazySingleton):
         if not interface in self._interfaces:
             raise TypeError(f"Interface {interface.__name__!r} is not registered")
         if not issubclass(new_impl, interface):
             raise TypeError(f"Class {new_impl} is not a subclass of {interface}")
-        self._interfaces[interface].override(new_impl)
+        self._interfaces[interface].override(target)
 
     @threadsafe
-    def implement(self, interface: Type, impl: Type):
+    def implement(self, interface: Type, impl: Type, target: LazySingleton):
         if not interface in self._interfaces:
             raise TypeError(f"Interface {interface.__name__!r} is not registered")
         if not issubclass(impl, interface):
             raise TypeError(f"Class {impl} is not a subclass of {interface}")
-        self._interfaces[interface].implement(impl)
+        self._interfaces[interface].implement(target)
