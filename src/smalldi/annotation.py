@@ -1,16 +1,26 @@
+"""
+The `Provide[T]` annotation that marks a parameter for injection, and the helpers reading it.
+"""
 import inspect
 from typing import TypeVar, Generic, get_origin, get_args, Iterator, Callable, Any, TypeAlias, Annotated
 
 _T = TypeVar("_T")
 
 class _Provide(Generic[_T]):
-    """Provide annotation tells smalldi to find instance of T and inject it into function"""
+    """
+    Marker behind `Provide[T]`: a parameter annotated with it receives the instance of `T`.
+
+    `Provide` is `Annotated[T, _Provide]`, so the marker travels inside
+    `Annotated` metadata. `_Provide[T]` itself is recognised too.
+    """
     @staticmethod
     def unwrap(tp: object) -> type:
         """
-        Unwraps annotation to get inner type.
-        :param tp: annotation itself
-        :return: inner type T
+        Returns the `T` of a `Provide[T]` annotation.
+
+        :param tp: annotation to unwrap: `_Provide[T]`, or `Annotated[T, ...]` with `_Provide` among its metadata
+        :return: inner type `T`
+        :raises TypeError: if `tp` is neither form
         """
         origin = get_origin(tp)
         if origin is _Provide:
@@ -28,13 +38,14 @@ class _Provide(Generic[_T]):
     @staticmethod
     def iter_annotations(func: Callable) -> Iterator[Any]:
         """
-        Provides an iterator that extracts and yields annotations of type `Provide`
-        from the parameters of a given function's signature.
-        :param func: The function whose parameter annotations will be inspected.
-        :type func: Callable
-        :return: An iterator over the unwrapped annotations of type `Provide` found
-            in the function's parameters.
-        :rtype: Iterator[str, Any]
+        Yields `(name, T)` for every parameter of a function annotated with `Provide[T]`.
+
+        Parameters with other annotations, or without one, are skipped.
+
+        :param func: function whose signature is inspected
+        :return: iterator of `(parameter name, T)` pairs, in signature order
+        :raises ValueError: from `inspect.signature`, if no signature can be provided for `func`
+        :raises TypeError: from `inspect.signature`, if `func` is not a supported callable
         """
         signature = inspect.signature(func)
         for name, param in signature.parameters.items():

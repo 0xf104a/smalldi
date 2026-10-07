@@ -1,15 +1,27 @@
 # Tests for smalldi
 
-This module contains tests for a smalldi library with the use of pytest
+Tests use pytest. Run them from `src/`:
 
-## Test structure
-- `test_provide.py` - Tests for class `Provide`
-- `test_injector.py` - Tests for class `Injector`
-- `test_interfaces.py` - Tests for interfaces (`@Injector.interface`, `@Injector.implements`, `@Injector.override`, `LazyInterfaceImpl`, `InterfaceResolver`)
-- `test_singleton.py` - Tests for lazy singletons (`LazySingleton`): laziness, overrides and freezing
-- `test_concurrency.py` - Tests for `@synchronized` and `@threadsafe`
-- `test_wrappers.py` - Tests for wrappers (currently only `staticclass`)
-- `test_integration.py` - Library-level tests
-- `test_container.py` - Tests for `Container`
+```shell
+cd src && python -m pytest
+```
+
+## Test files
+- `test_override_rules.py` — specification of singleton overrides: validation, non-transitivity, freezing, circular dependencies
+- `test_interface_bindings.py` — specification of interface bindings: implementations, overrides, freezing
+- `test_injector_concurrency.py` — specification of threading behaviour: exactly-once construction, races between bindings and injection, deadlocks
+- `test_injector.py` — `Injector` registration, injection and the deprecated `Injector.singletons_available`
+- `test_provide.py` — the `Provide[T]` annotation as seen through `@Injector.inject`
+- `test_container.py` — `Container` and `ComponentRegistration`
+- `test_integration.py` — library-level scenarios with nested injection
+- `test_concurrency.py` — `@synchronized` and `@threadsafe` from `smalldi.concurrency`
+- `test_wrappers.py` — `staticclass`
+
+The three specification files (`test_override_rules.py`, `test_interface_bindings.py`,
+`test_injector_concurrency.py`) define the binding and threading semantics of the library. Where the
+library disagrees with them, the test fails and the library is what needs changing.
+
+`test_cross_thread_circular_dependency_does_not_deadlock` in `test_injector_concurrency.py` is skipped as a
+known limitation: dependency cycles spanning several threads are not detected and may deadlock.
 
 The `reset_injector` fixture from `conftest.py` isolates the injector registry between tests.

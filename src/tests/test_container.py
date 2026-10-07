@@ -24,11 +24,11 @@ def test_component_registers_component_and_returns_object(reset_injector):
 
     decorated = MyContainer.component()(fn)
 
-    # Повертає об'єкт без змін
+    # Returns the object unchanged
     assert decorated is fn
 
-    # Реєстрація зберігається в singleton-інстансі контейнера
-    inst = Injector._singletons[MyContainer]
+    # The registration is kept in the container's singleton instance
+    inst = Injector.get_instance(MyContainer)
     assert len(inst.components) == 1
     reg = inst.components[0]
     assert isinstance(reg, ComponentRegistration)
@@ -46,7 +46,7 @@ def test_component_registers_metadata_args_kwargs(reset_injector):
     class Service:
         pass
 
-    inst = Injector._singletons[MyContainer]
+    inst = Injector.get_instance(MyContainer)
     assert len(inst.components) == 1
     reg = inst.components[0]
     assert reg.component is Service
@@ -67,7 +67,7 @@ def test_get_components_yields_only_components_in_order(reset_injector):
     class B:
         pass
 
-    inst = Injector._singletons[MyContainer]
+    inst = Injector.get_instance(MyContainer)
     assert list(inst._get_components()) == [a, B]
 
 
@@ -88,7 +88,7 @@ def test_on_component_register_is_called_with_registration(reset_injector):
     assert calls[0].component is comp
     assert calls[0].args == ("x",)
     assert calls[0].kwargs == {"kind": "k"}
-    singleton = Injector._singletons[MyContainer]
+    singleton = Injector.get_instance(MyContainer)
     assert singleton.components == calls
 
 def test_component_raises_if_not_singleton_at_decoration_time(reset_injector):
@@ -115,9 +115,9 @@ def test_overridden_container_receives_components(reset_injector):
     def fn():
         pass
 
-    fake = Injector._singletons[FakeContainer]
+    fake = Injector.get_instance(FakeContainer)
     assert [r.component for r in fake.components] == [fn]
-    assert Injector._singletons[MyContainer] is fake
+    assert Injector.get_instance(MyContainer) is fake
 
 
 def test_container_with_components_cannot_be_overridden(reset_injector):

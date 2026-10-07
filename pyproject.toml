@@ -5,12 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "smalldi"
 version = "0.3.0"
-description = "Small, annotation-driven dependency injection for Python."
+description = "Annotation-driven dependency injection for Python with Provide[T] type hints and decorators."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Anna-Sofia Kasierocka", email = "f104a@f104a.io" }]
-keywords = ["dependency injection", "di", "typing", "annotations"]
+keywords = [
+  "dependency injection", "di", "typing", "annotations",
+  "dependency-injection", "inversion-of-control", "ioc", "singleton", "minimal", "lightweight",
+  "decorators", "type-hints", "zero-dependency",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -23,10 +27,9 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Typing :: Typed",
   "Topic :: Software Development :: Libraries",
+  "Operating System :: OS Independent",
 ]
-dependencies = [
-  "typing-extensions>=4.5; python_version>='3.11'"
-]
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/0xf104a/smalldi"

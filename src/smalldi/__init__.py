@@ -1,5 +1,17 @@
+"""
+Annotation-driven dependency injection.
+
+`Injector` registers classes as singletons and abstract classes as interfaces,
+binds them to each other with overrides and implementations, and fills the
+parameters of `@Injector.inject`-decorated functions that are annotated with
+`Provide[T]`. Singletons are instantiated on first use, at most once each.
+
+Public names: `Injector`, `Provide` and `SingletonFrozenError`.
+"""
 import functools
 import threading
+import types
+import warnings
 from inspect import isabstract
 from typing import Any
 
@@ -14,52 +26,117 @@ __email__ = "f104a@f104a.io"
 __version__ = "0.3.0"
 __all__ = ["Injector", "Provide", "SingletonFrozenError"]
 
+
+class _SingletonsAvailable:
+    """
+    Descriptor behind the deprecated `Injector.singletons_available` class attribute.
+
+    Every read emits a `DeprecationWarning` and returns a read-only snapshot,
+    a `types.MappingProxyType`, mapping each registered singleton class to the
+    object `Injector.get_instance` returns for it. Building the snapshot
+    instantiates every registered singleton that has no instance yet and
+    freezes all of them, so none can be overridden afterwards. An overridden
+    class maps to its override's instance. Interfaces are not included.
+
+    The list of registered classes is copied while holding the injector's
+    class mutex; the instances are then requested outside the lock, one
+    `Injector.get_instance` call per class. Assigning to an item of the
+    snapshot raises `TypeError`.
+
+    :raises RuntimeError: from `Injector.get_instance`, if a constructor forms a circular dependency
+    :raises Exception: any exception raised by a singleton constructor propagates unchanged;
+        singletons instantiated before it stay instantiated and frozen
+    """
+
+    def __get__(self, obj, owner):
+        """
+        :param obj: None for class-level access, which is the only supported form
+        :param owner: the `Injector` class
+        :return: read-only mapping of registered singleton classes to their instances
+        """
+        warnings.warn(
+            "Injector.singletons_available is deprecated and will be removed in 1.0.0; "
+            "inject singletons with Provide[T] instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        with owner.__class_mutex__:
+            classes = list(owner._singletons_available)
+        return types.MappingProxyType({cls: owner.get_instance(cls) for cls in classes})
+
+
 @staticclass
 class Injector:
     """
-    The injector class handles all the dependency injections.
+    Static registry of singletons and interfaces, and the injector of their instances.
 
-    `Injector` is a static class: it can't be instantiated and all of its state
-    is kept at class level. Classes are registered with `@Injector.singleton`
-    and injected into functions with `@Injector.inject`. Instances are
-    reached through injection only; the deprecated `Injector.singletons_available`
-    still exposes a read-only snapshot of them, with a warning.
+    `Injector` can't be instantiated: all of its state is kept at class level.
+    Classes are registered with `@Injector.singleton`, abstract classes with
+    `@Injector.interface`. A singleton declares that it implements an interface
+    with `@Injector.implements`, and replaces an interface's implementation or
+    another singleton with `@Injector.override`; both decorators go above
+    `@Injector.singleton`. Functions decorated with `@Injector.inject` receive
+    the instance for every parameter annotated with `Provide[T]`, where `T` is
+    a registered singleton or interface.
 
-    Classes marked with `@Injector.interface` may be injected too: a singleton
-    declares that it implements them with `@Injector.implements`, and
-    `Provide[Interface]` then receives that singleton's instance. Both
-    interfaces and singletons may be replaced with `@Injector.override`.
+    Instances are created on first use, at most once per singleton, through
+    `Injector.get_instance`. Asking for an instance freezes the singleton or
+    interface, so it can't be overridden afterwards. Overrides are not
+    transitive: an override can't be overridden, and an overridden singleton
+    can't become an override.
 
-    Every registered singleton is held by a `LazySingleton` and every
-    interface by a `LazyInterfaceImpl`. They know what they delegate to (an
-    override, an implementation) and whether they are frozen; the injector
-    only looks them up and binds them.
+    Every registered singleton is held by one `LazySingleton` in
+    `_singletons_available`, and every interface by an `InterfaceResolver`
+    entry that refers to those `LazySingleton` objects.
 
-    Registration, lookups and bindings are guarded by one reentrant lock,
-    never held while an instance is being created, so the injector may be
-    used from several threads and constructors may use the injector.
-    Singletons are instantiated lazily, at most once each.
+    Locking. The reentrant class mutex `__class_mutex__` guards the registry:
+    `singleton`, `interface`, `override`, `implements`, `is_singleton` and
+    `is_interface` hold it for the whole call through `@threadsafe`; `inject`
+    takes it while it checks each `Provide[T]` parameter at decoration time;
+    the decorators returned by `override` and `implements` hold it while they
+    bind, which also takes the lock of each `LazySingleton` involved.
+    `get_instance` holds the class mutex only to look a singleton up and then
+    constructs it under that singleton's own lock. For an interface, however,
+    it resolves the binding and constructs the implementation while still
+    holding the class mutex. Constructors that use the injector therefore
+    take the class mutex while holding their singleton's lock: if another
+    thread holds the class mutex while waiting for that same singleton's
+    lock, by resolving the singleton through an interface or by overriding or
+    implementing it, both threads deadlock.
+
+    `Injector.singletons_available` is deprecated: reading it warns, returns a
+    read-only mapping of every registered singleton class to its instance, and
+    freezes all of them. See `_SingletonsAvailable`.
     """
-    # Not threadsafe on their own: access only while holding _registry_lock.
-    # This is the same lock that guards the bindings of every LazySingleton and
-    # LazyInterfaceImpl, so looking a singleton up and binding it is one step.
-    # It is reentrant and never held while an instance is being created.
+    # Guarded by __class_mutex__: every method that reads or writes these holds
+    # it, through @threadsafe, `with cls.__class_mutex__` or @mutex. The mutex
+    # is reentrant. get_instance releases it before a singleton constructor runs,
+    # except when the singleton is reached through an interface.
     _singletons_available: dict[type, LazySingleton] = dict()
     _interface_resolver = InterfaceResolver()
     __class_mutex__ = threading.RLock()
 
+    singletons_available = _SingletonsAvailable()
+
     @classmethod
     def get_instance(cls, tp: type) -> Any:
         """
-        Returns the instance to inject for a registered singleton or interface,
-        following overrides and implementations, creating it if needed.
-        Freezes every singleton on the way, so none of them can be overridden
-        afterwards.
+        Returns the instance to inject for a registered singleton or interface, creating it if needed.
+
+        Follows the interface's override or implementation and the singleton's
+        override, and freezes every singleton and interface on the way, so none
+        of them can be overridden afterwards. The class mutex is held while the
+        singleton is looked up and released before its constructor runs; an
+        interface is resolved, and its implementation constructed, with the
+        class mutex held.
 
         :param tp: registered singleton class or interface
-        :return: the singleton instance
-        :raises TypeError: if `tp` is neither a registered singleton nor an interface
-        :raises NotImplementedError: if `tp` is an interface without an implementation or override
+        :return: the instance
+        :raises KeyError: if `tp` is neither a registered singleton nor a registered interface
+        :raises RuntimeError: if `tp` is an interface with neither an implementation nor an override
+        :raises RuntimeError: if the singleton is re-entered by its own constructor, directly or
+            through its dependencies (circular dependency)
+        :raises Exception: any exception raised by the constructor propagates unchanged
         """
         with cls.__class_mutex__:
             if cls._interface_resolver.is_interface(tp):
@@ -70,26 +147,28 @@ class Injector:
     @classmethod
     def inject(cls, fn):
         """
-        Injects dependencies into function.
+        Makes a function receive the instance of every parameter annotated with `Provide[T]`.
 
-        Every parameter annotated with `Provide[T]` receives the instance of
-        singleton `T` when the function is called, unless the caller passes that
-        argument explicitly by keyword. If `T` is an interface, the instance of
-        the singleton implementing it is passed. If `T` is overridden with
-        `@Injector.override`, the override's instance is passed. Singletons are resolved on each
-        call, not at decoration time, so decorating a function doesn't
-        instantiate them, and overrides made before the first call are respected.
+        Each such parameter is filled with `Injector.get_instance(T)` on every
+        call, unless the caller passes that argument by keyword. If `T` is an
+        interface, the instance of its override or implementation is passed;
+        if `T` is overridden, the override's instance is passed. Nothing is
+        instantiated at decoration time, so overrides declared before the first
+        call are respected.
 
-        All singletons and interfaces must already be registered when the
-        function is decorated. An interface doesn't need an implementation yet:
-        it must have one by the time the function is called, otherwise the call
-        raises `NotImplementedError`. Dependencies passed positionally aren't
-        detected: pass them by keyword to override injection.
+        Every `T` must be a registered singleton or interface when the function
+        is decorated. An interface doesn't need a binding yet: it needs one by
+        the time the function is called. Dependencies passed positionally aren't
+        detected: the parameter is filled by keyword as well, so the call raises
+        `TypeError` for a duplicate argument.
 
         :param fn: function to inject dependencies into
-        :return: function with injected dependencies
-        :raises TypeError: if a `Provide[T]` dependency is neither a registered
-            singleton nor an interface
+        :return: wrapper of `fn` with the same signature
+        :raises TypeError: at decoration, if a `Provide[T]` parameter names neither a registered
+            singleton nor a registered interface
+        :raises RuntimeError: at call time, if an injected interface has no binding, or a
+            constructor forms a circular dependency
+        :raises Exception: at call time, any exception raised by a constructor propagates unchanged
         """
         name2type = dict()
         for name, tp in _Provide.iter_annotations(fn):
@@ -109,6 +188,18 @@ class Injector:
     @threadsafe
     @classmethod
     def singleton(cls, target_cls):
+        """
+        Registers a class as a singleton, to be instantiated on first use.
+
+        The class is not instantiated here. Its constructor is called by
+        `Injector.get_instance` the first time an instance is needed, and must
+        work without arguments, or be decorated with `@Injector.inject` so that
+        its parameters are provided.
+
+        :param target_cls: class to register
+        :return: `target_cls`, unchanged
+        :raises TypeError: if `target_cls` is abstract, or is already registered
+        """
         if isabstract(target_cls):
             raise TypeError(f"Class {target_cls} is abstract and cannot be a singleton. Maybe you meant to use @Injector.interface instead?")
         if target_cls in cls._singletons_available:
@@ -119,6 +210,21 @@ class Injector:
     @threadsafe
     @classmethod
     def _override_singleton(cls, source_cls):
+        """
+        Returns the decorator that makes a registered singleton override `source_cls`.
+
+        The decorator validates everything before binding anything: on failure
+        neither singleton changes.
+
+        :param source_cls: registered singleton to override
+        :return: decorator taking the overriding class and returning it unchanged
+        :raises TypeError: from the decorator, if `source_cls` or the overriding class is not a
+            registered singleton, the overriding class is not a subclass of `source_cls`,
+            both are the same class, `source_cls` is an override itself, or the overriding
+            class is already overridden
+        :raises SingletonFrozenError: from the decorator, if `source_cls` is frozen
+        :raises RuntimeError: from the decorator, if `source_cls` is already overridden
+        """
         @mutex(cls.__class_mutex__)
         def wrapper(new_cls):
             if source_cls not in cls._singletons_available:
@@ -141,6 +247,16 @@ class Injector:
     @threadsafe
     @classmethod
     def _override_interface(cls, interface):
+        """
+        Returns the decorator that makes a registered singleton override `interface`.
+
+        :param interface: registered interface to override
+        :return: decorator taking the overriding class and returning it unchanged
+        :raises TypeError: from the decorator, if the overriding class is not a registered
+            singleton, not a subclass of `interface`, already overridden, or the
+            interface's implementation, or if `interface` is already overridden
+        :raises SingletonFrozenError: from the decorator, if `interface` is frozen
+        """
         @mutex(cls.__class_mutex__)
         def wrapper(new_impl):
             if new_impl not in cls._singletons_available:
@@ -155,6 +271,13 @@ class Injector:
     @threadsafe
     @classmethod
     def interface(cls, target_cls):
+        """
+        Registers an abstract class as an interface that singletons may implement or override.
+
+        :param target_cls: abstract class (an `abc.ABC` subclass with at least one abstract method)
+        :return: `target_cls`, unchanged
+        :raises TypeError: if `target_cls` is not abstract, or is already registered as an interface
+        """
         if not isabstract(target_cls):
             raise TypeError(f"Class {target_cls} is not abstract and cannot be an interface. Maybe you meant to use @Injector.singleton instead?")
         cls._interface_resolver.register(target_cls)
@@ -163,6 +286,26 @@ class Injector:
     @threadsafe
     @classmethod
     def override(cls, what: type):
+        """
+        Returns the decorator that makes a registered singleton injected instead of `what`.
+
+        Apply the decorator above `@Injector.singleton`. `what` may be a
+        registered interface, whose implementation (if any) is then never
+        injected through it, or a registered singleton, which then shares the
+        override's instance and is never instantiated through the injector.
+        Overrides are not transitive: an override can't be overridden and an
+        overridden singleton can't become an override. Each target is
+        overridden at most once, and a frozen target can't be overridden.
+
+        :param what: registered interface or singleton to override
+        :return: decorator taking the overriding class and returning it unchanged
+        :raises TypeError: from the decorator, if `what` is not registered, the overriding class
+            is not a registered singleton or not a subclass of `what`, the override would form
+            a chain, a class overrides itself, an interface is overridden twice, or the
+            overriding class is the interface's implementation
+        :raises SingletonFrozenError: from the decorator, if `what` is frozen
+        :raises RuntimeError: from the decorator, if `what` is a singleton that is already overridden
+        """
         if cls._interface_resolver.is_interface(what):
             return cls._override_interface(what)
         else:
@@ -171,6 +314,23 @@ class Injector:
     @threadsafe
     @classmethod
     def implements(cls, what: type):
+        """
+        Returns the decorator that declares a registered singleton as the implementation of interface `what`.
+
+        Apply the decorator above `@Injector.singleton`. `Provide[what]` then
+        receives the implementation's instance, unless the interface is
+        overridden, in which case the override's instance is injected and the
+        implementation is never instantiated through the interface. An
+        interface has at most one implementation.
+
+        :param what: registered interface
+        :return: decorator taking the implementing class and returning it unchanged
+        :raises TypeError: from the decorator, if the implementing class is not a registered
+            singleton, `what` is not a registered interface, the class is not a subclass of
+            `what`, or the class is the interface's override
+        :raises RuntimeError: from the decorator, if `what` already has an implementation
+        :raises SingletonFrozenError: from the decorator, if `what` is frozen and has no override
+        """
         @mutex(cls.__class_mutex__)
         def wrapper(impl):
             if impl not in cls._singletons_available:
@@ -185,9 +345,21 @@ class Injector:
     @threadsafe
     @classmethod
     def is_interface(cls, tp: type) -> bool:
+        """
+        Tells whether a class is registered as an interface.
+
+        :param tp: class to check
+        :return: True if `tp` was registered with `@Injector.interface`
+        """
         return cls._interface_resolver.is_interface(tp)
 
     @threadsafe
     @classmethod
     def is_singleton(cls, target: type) -> bool:
+        """
+        Tells whether a class is registered as a singleton.
+
+        :param target: class to check
+        :return: True if `target` was registered with `@Injector.singleton`
+        """
         return target in cls._singletons_available

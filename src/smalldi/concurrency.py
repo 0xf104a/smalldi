@@ -200,9 +200,19 @@ def threadsafe(fn: Any) -> Any:
 
         return instance_wrapper
 
-    raise RuntimeError("Unknown function placement")
+    raise RuntimeError("Unknown function placement")  # unreachable: every placement is handled above
 
-def mutex(fn_mutex: AbstractContextManager): # makes function to run within mutex
+def mutex(fn_mutex: AbstractContextManager):
+    """
+    Returns a decorator that runs the decorated function inside `with fn_mutex:`.
+
+    Unlike `@synchronized`, the lock (or any context manager) is supplied by
+    the caller, so several functions may share it. Async functions aren't
+    rejected: the context would be left before their body runs.
+
+    :param fn_mutex: context manager entered around every call, usually a lock
+    :return: decorator wrapping a function with the context manager
+    """
     def decorate(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
