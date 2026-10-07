@@ -48,7 +48,6 @@ class Injector:
     _interface_resolver = InterfaceResolver()
     __class_mutex__ = threading.RLock()
 
-    @threadsafe
     @classmethod
     def get_instance(cls, tp: type) -> Any:
         """
@@ -62,9 +61,10 @@ class Injector:
         :raises TypeError: if `tp` is neither a registered singleton nor an interface
         :raises NotImplementedError: if `tp` is an interface without an implementation or override
         """
-        if cls._interface_resolver.is_interface(tp):
-            return cls._interface_resolver.get_instance(tp)
-        singleton = cls._singletons_available[tp]
+        with cls.__class_mutex__:
+            if cls._interface_resolver.is_interface(tp):
+                return cls._interface_resolver.get_instance(tp)
+            singleton = cls._singletons_available[tp]
         return singleton.get_instance()
 
     @classmethod
