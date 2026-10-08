@@ -679,8 +679,9 @@ def test_failing_constructor_under_contention_never_leaks_partial_instance(reset
 # Regression: acyclic resolution through an interface and a singleton from two threads
 @bounded
 def test_acyclic_interface_and_singleton_resolution_does_not_deadlock(reset_injector):
-    """Impl needs J (another interface) in its constructor; resolving Impl and I from two threads shares one Impl."""
+    """Impl's constructor resolves interface J after starting; meanwhile another thread resolves I (implemented by Impl). No deadlock, one Impl."""
     built = []
+    started = threading.Event()
 
     @Injector.interface
     class J(ABC):
@@ -703,29 +704,28 @@ def test_acyclic_interface_and_singleton_resolution_does_not_deadlock(reset_inje
     @Injector.implements(I)
     @Injector.singleton
     class Impl(I):
-        @Injector.inject
-        def __init__(self, j: Provide[J] = None):
+        def __init__(self):
             built.append(type(self))
+            started.set()
             time.sleep(SLOW * 20)
-            self.j = j
+            self.j = Injector.get_instance(J)
 
         def run(self):
             return "impl"
 
-    def resolve_interface_later():
-        time.sleep(SLOW * 5)
+    def resolve_interface_once_started():
+        assert started.wait(TIMEOUT / 2), "Impl's constructor did not start"
         return Injector.get_instance(I)
 
     result_impl, result_iface = run_concurrently(
         lambda: Injector.get_instance(Impl),
-        resolve_interface_later,
+        resolve_interface_once_started,
     )
     impl = value(result_impl)
     assert value(result_iface) is impl
     assert type(impl) is Impl
     assert type(impl.j) is JImpl
     assert built == [Impl]
-
 
 # Regression: override attempted while the target's constructor is running
 @bounded

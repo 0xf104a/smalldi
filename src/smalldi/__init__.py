@@ -94,15 +94,15 @@ class Injector:
     `is_interface` hold it for the whole call through `@threadsafe`; `inject`
     takes it while it checks each `Provide[T]` parameter at decoration time;
     the decorators returned by `override` and `implements` hold it while they
-    bind, which also takes the lock of each `LazySingleton` involved.
-    `get_instance` holds the class mutex only to look a singleton up and then
-    constructs it under that singleton's own lock. For an interface, however,
-    it resolves the binding and constructs the implementation while still
-    holding the class mutex. Constructors that use the injector therefore
-    take the class mutex while holding their singleton's lock: if another
-    thread holds the class mutex while waiting for that same singleton's
-    lock, by resolving the singleton through an interface or by overriding or
-    implementing it, both threads deadlock.
+    bind, which also briefly takes the state lock of each `LazySingleton` and
+    interface binding involved. `get_instance` holds the class mutex only to
+    look the singleton or interface binding up and releases it before any
+    instance is requested. A constructor runs under its singleton's build
+    lock only, so no lock that guards the registry or a binding is ever held
+    while a constructor runs. A deadlock is still possible when threads wait
+    for each other across constructors: a dependency cycle spanning several
+    threads, or a constructor waiting for a thread that needs the singleton
+    being constructed. Neither is detected.
 
     `Injector.singletons_available` is deprecated: reading it warns, returns a
     read-only mapping of every registered singleton class to its instance, and
@@ -110,8 +110,7 @@ class Injector:
     """
     # Guarded by __class_mutex__: every method that reads or writes these holds
     # it, through @threadsafe, `with cls.__class_mutex__` or @mutex. The mutex
-    # is reentrant. get_instance releases it before a singleton constructor runs,
-    # except when the singleton is reached through an interface.
+    # is reentrant and is never held while an instance is requested.
     _singletons_available: dict[type, LazySingleton] = dict()
     _interface_resolver = InterfaceResolver()
     __class_mutex__ = threading.RLock()
@@ -125,10 +124,8 @@ class Injector:
 
         Follows the interface's override or implementation and the singleton's
         override, and freezes every singleton and interface on the way, so none
-        of them can be overridden afterwards. The class mutex is held while the
-        singleton is looked up and released before its constructor runs; an
-        interface is resolved, and its implementation constructed, with the
-        class mutex held.
+        of them can be overridden afterwards. The class mutex is held only while
+        the singleton or interface binding is looked up.
 
         :param tp: registered singleton class or interface
         :return: the instance
@@ -140,9 +137,12 @@ class Injector:
         """
         with cls.__class_mutex__:
             if cls._interface_resolver.is_interface(tp):
-                return cls._interface_resolver.get_instance(tp)
-            singleton = cls._singletons_available[tp]
-        return singleton.get_instance()
+                binding = cls._interface_resolver.get_binding(tp)
+            else:
+                binding = cls._singletons_available[tp]
+        if isinstance(binding, LazySingleton):
+            return binding.get_instance()
+        return binding.get_impl()
 
     @classmethod
     def inject(cls, fn):

@@ -39,9 +39,14 @@ class LazySingleton:
     overridden anymore. A failed construction leaves no instance behind, so
     the next `get_instance()` call runs the constructor again.
 
-    Every method takes the reentrant lock `__instance_mutex__` of the instance
-    for the duration of the call: `get_instance()` explicitly, the others
-    through `@threadsafe`. The lock is held while the constructor runs.
+    Two reentrant locks guard a `LazySingleton`. The state lock
+    `__instance_mutex__` guards the bindings and the frozen flag; every method
+    except `get_instance()` holds it for the whole call through `@threadsafe`,
+    and `get_instance()` holds it only to freeze the singleton and read its
+    delegate. It is never held while a constructor runs or while another
+    singleton is asked for its instance. The build lock `_build_lock` is held
+    while the constructor runs, so concurrent first calls create exactly one
+    instance; nothing else takes it.
 
     :ivar _cls: the registered class, called to create the instance
     :ivar _override: class called instead of `_cls`, set by `override()`; `Injector` never sets it
@@ -50,7 +55,8 @@ class LazySingleton:
     :ivar _instance: the created instance, or None
     :ivar _frozen: whether an instance was requested already
     :ivar _threads: idents of the threads currently inside the constructor
-    :ivar __instance_mutex__: the lock guarding every method
+    :ivar __instance_mutex__: the state lock
+    :ivar _build_lock: the lock held while the constructor runs
     """
 
     # _cls may None for interfaces, e.g. only override was imported
@@ -67,6 +73,7 @@ class LazySingleton:
         self._frozen = False
         self._threads = AtomicSet()
         self.__instance_mutex__ = threading.RLock()
+        self._build_lock = threading.RLock()
 
     def __repr__(self) -> str:
         """
@@ -85,15 +92,18 @@ class LazySingleton:
         """
         Returns the instance, creating it on the first call, and freezes the singleton.
 
-        If the singleton delegates to an override, the override's `get_instance()`
-        is returned, which freezes the override too. Otherwise the instance is
-        created by calling `_override` if set, else `_cls`, while the calling
-        thread's ident is recorded in `_threads`: a nested call from the same
-        thread, which happens when the constructor depends on this singleton
-        directly or through other singletons, is a circular dependency. The
-        singleton is frozen before anything else happens, so it stays frozen if
-        the constructor raises. The instance lock is held throughout, so another
-        thread asking for the instance waits for the constructor to finish.
+        The singleton is frozen first, under the state lock, so it stays frozen
+        if the constructor raises, and an override attempted while the
+        constructor runs fails with `SingletonFrozenError`. If the singleton
+        delegates to an override, the override's `get_instance()` is returned,
+        which freezes the override too; no lock of this singleton is held for
+        that call. Otherwise the instance is created under the build lock by
+        calling `_override` if set, else `_cls`, while the calling thread's
+        ident is recorded in `_threads`: a nested call from the same thread,
+        which happens when the constructor depends on this singleton directly
+        or through other singletons, is a circular dependency. Another thread
+        asking for the instance waits on the build lock until the constructor
+        finishes.
 
         :return: the instance
         :raises RuntimeError: if the current thread has no ident
@@ -103,8 +113,10 @@ class LazySingleton:
         """
         with self.__instance_mutex__:
             self._frozen = True
-            if self._delegate is not None:
-                return self._delegate.get_instance()
+            delegate = self._delegate
+        if delegate is not None:
+            return delegate.get_instance()
+        with self._build_lock:
             ident = threading.current_thread().ident
             if ident is None:
                 raise RuntimeError("Can not identify thread")
@@ -112,17 +124,15 @@ class LazySingleton:
             if was_in_our_path:
                 raise RuntimeError(
                     f"Singleton {self._name} re-entered itself during instantiation: likely circular dependency")
-            if self._instance is None:
-                try:
+            try:
+                if self._instance is None:
                     if self._override is not None:
                         self._instance = self._override()
                     else:
                         self._instance = self._cls()
-                except BaseException:
-                    self._threads.remove(ident)
-                    raise
-            self._threads.remove(ident)
-        return self._instance
+                return self._instance
+            finally:
+                self._threads.remove(ident)
 
     @threadsafe
     def override(self, new: Type):
