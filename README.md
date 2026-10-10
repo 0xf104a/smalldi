@@ -297,7 +297,12 @@ def main(cohee_neko: Provide[CoheeNeko]) -> int:
     return 0
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except ValueError as e:
+        # Cohee-Neko is injected before main() runs, so Kansai-Neko's empty stock surfaces here
+        print(f"{type(e).__name__}: {e}")
+        sys.exit(1)
 ```
 
 </details>
