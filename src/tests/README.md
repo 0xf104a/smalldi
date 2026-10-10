@@ -7,8 +7,8 @@ cd src && python -m pytest
 ```
 
 ## Test files
-- `test_override_rules.py` — specification of singleton overrides: validation, non-transitivity, freezing, circular dependencies
-- `test_interface_bindings.py` — specification of interface bindings: implementations, overrides, freezing
+- `test_override_rules.py` — specification of singleton overrides: validation, conditional application (`when=...`), non-transitivity, freezing, circular dependencies
+- `test_interface_bindings.py` — specification of interface bindings: implementations, overrides (including conditional overrides), freezing
 - `test_injector_concurrency.py` — specification of threading behaviour: exactly-once construction, races between bindings and injection, deadlocks
 - `test_injector.py` — `Injector` registration, injection and the deprecated `Injector.singletons_available`
 - `test_provide.py` — the `Provide[T]` annotation as seen through `@Injector.inject`

@@ -60,6 +60,51 @@ def test_override_reuses_already_injected_override_instance(reset_injector):
     assert built == [T]
 
 
+# A2b
+def test_conditional_override_false_keeps_singleton_binding_unchanged(reset_injector):
+    """override(S, when=False)(T): S still resolves to S and T resolves to T."""
+    built = []
+
+    @Injector.singleton
+    class S:
+        def __init__(self):
+            built.append(type(self))
+
+    @Injector.singleton
+    class T(S):
+        pass
+
+    @Injector.override(S, when=lambda: False)
+    @Injector.singleton
+    class Disabled(S):
+        pass
+
+    s = provide(S)
+    t = provide(T)
+    d = provide(Disabled)
+
+    assert type(s) is S
+    assert type(t) is T
+    assert type(d) is Disabled
+    assert s is not t
+    assert s is not d
+    assert t is not d
+    assert built == [S, T, Disabled]
+
+
+# A2c
+def test_conditional_override_false_skips_override_validation(reset_injector):
+    """when=False disables override binding and its singleton validation for the decorated class."""
+    @Injector.singleton
+    class S:
+        pass
+
+    class NotSingleton(S):
+        pass
+
+    assert Injector.override(S, when=lambda: False)(NotSingleton) is NotSingleton
+
+
 # A3
 def test_override_class_must_be_registered_singleton(reset_injector):
     """Overriding with a class that is not a registered singleton raises TypeError."""

@@ -13,7 +13,7 @@ import threading
 import types
 import warnings
 from inspect import isabstract
-from typing import Any
+from typing import Any, Callable
 
 from smalldi._interfaces import InterfaceResolver
 from smalldi._singleton import LazySingleton, SingletonFrozenError
@@ -285,7 +285,7 @@ class Injector:
 
     @threadsafe
     @classmethod
-    def override(cls, what: type):
+    def override(cls, what: type, when: Callable[[], bool] = lambda: True):
         """
         Returns the decorator that makes a registered singleton injected instead of `what`.
 
@@ -298,6 +298,7 @@ class Injector:
         overridden at most once, and a frozen target can't be overridden.
 
         :param what: registered interface or singleton to override
+        :param when: A function returning True if the override should be applied
         :return: decorator taking the overriding class and returning it unchanged
         :raises TypeError: from the decorator, if `what` is not registered, the overriding class
             is not a registered singleton or not a subclass of `what`, the override would form
@@ -306,6 +307,8 @@ class Injector:
         :raises SingletonFrozenError: from the decorator, if `what` is frozen
         :raises RuntimeError: from the decorator, if `what` is a singleton that is already overridden
         """
+        if not when():
+            return lambda candidate: candidate
         if cls._interface_resolver.is_interface(what):
             return cls._override_interface(what)
         else:

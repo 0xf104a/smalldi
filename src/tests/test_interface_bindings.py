@@ -66,6 +66,32 @@ def test_override_is_injected_for_interface(reset_injector):
     assert type(provide(J)) is JO
 
 
+# B2b
+def test_conditional_override_false_keeps_interface_implementation(reset_injector):
+    """override(I, when=False)(O) does not change I: Provide[I] stays the implementation."""
+    @Injector.interface
+    class I(ABC):
+        @abstractmethod
+        def run(self):
+            pass
+
+    @Injector.implements(I)
+    @Injector.singleton
+    class Impl(I):
+        def run(self):
+            return "impl"
+
+    @Injector.override(I, when=lambda: False)
+    @Injector.singleton
+    class O(I):
+        def run(self):
+            return "override"
+
+    assert type(provide(I)) is Impl
+    assert provide(I) is provide(Impl)
+    assert provide(I) is not provide(O)
+
+
 # B3
 def test_override_declared_before_implementation_wins(reset_injector):
     """override(K)(KO) then implements(K)(KI): both succeed and Provide[K] is the override instance."""

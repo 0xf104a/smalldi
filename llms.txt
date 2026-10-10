@@ -1,0 +1,50 @@
+# smalldi
+
+> Annotation-driven dependency injection for Python: classes are registered as singletons or interfaces with `Injector` decorators, and functions decorated with `@Injector.inject` receive instances for parameters annotated `Provide[T]`. Requires Python >=3.11, has zero runtime dependencies, MIT license.
+
+smalldi is a small library with a single static registry, `Injector`. `@Injector.singleton` registers a class, `@Injector.interface` registers an abstract class, `@Injector.implements(Interface)` and `@Injector.override(Target)` bind singletons to interfaces or to other singletons, and `@Injector.inject` fills `Provide[T]` parameters. `Injector.get_instance(T)` returns the instance for a registered singleton or interface. The package ships type information (`py.typed`).
+
+Singletons are lazy: `@Injector.singleton` does not instantiate the class. The instance is created the first time it is requested, at most once per class, and the constructor must take no arguments or be decorated with `@Injector.inject`. Registering the same class twice raises `TypeError`; a reloaded module defines new class objects that are registered as additional singletons, so module reloading is not supported.
+
+Interfaces: an interface is an `abc.ABC` subclass with at least one abstract method, registered with `@Injector.interface`. Exactly one singleton may be declared as its implementation with `@Injector.implements(Interface)`, applied above `@Injector.singleton`; the class must be a subclass of the interface. `Provide[Interface]` injects the implementation's instance, the same object `Provide[Implementation]` receives. A second implementation raises `RuntimeError`; calling an injected function while the interface has neither an implementation nor an override raises `RuntimeError`.
+
+Overrides: `@Injector.override(Target, when=lambda: ...)`, applied above `@Injector.singleton`, makes the decorated singleton the instance injected for `Target` only when `when()` returns `True`; when it returns `False`, the decorator is a no-op and leaves bindings unchanged. `Target` is a registered singleton or interface. The target's class, or the interface's implementation, is never instantiated through the injector, and an interface override wins whatever the order of declaration. When enabled, the override must be a registered singleton and a subclass of the target, and a class cannot override itself. Overrides are a single delegation hop and are not transitive: an override cannot be overridden, an overridden singleton cannot become an override, and both raise `TypeError`. Each target has at most one override; a second one raises `RuntimeError` for a singleton target and `TypeError` for an interface target. An interface whose implementation is overridden resolves to the implementation's override. Validation happens before anything is bound.
+
+Freezing: a singleton or interface is frozen the first time an instance is requested through it, even if the constructor raised or the interface had no binding. Overriding a frozen target raises `SingletonFrozenError`, importable from `smalldi`. A frozen interface still accepts a first implementation if it already has an override. Reading the deprecated `Injector.singletons_available` instantiates and freezes every registered singleton.
+
+`@Injector.inject` checks at decoration time that every `Provide[T]` names a registered singleton or interface (`TypeError` otherwise) and resolves the instances at every call, so overrides declared after decoration but before the first call are respected, and an interface needs a binding only by the time the function is called. A keyword argument passed by the caller replaces the injected value.
+
+Threads: the injector may be used from several threads. Each singleton is constructed at most once; other threads requesting the same instance wait for the constructor. No lock guarding the registry or a binding is held while a constructor runs. A binding racing the first injection of its target either wins or is refused with `SingletonFrozenError`. Circular dependencies within one thread raise `RuntimeError`. Known limitation: a dependency cycle spanning several threads, or a constructor waiting for another thread that needs the singleton being constructed, is not detected and may deadlock.
+
+Also included: `Container`, a singleton base class that collects classes and functions registered with `@MyContainer.component`; `Collector.collect_from_package`, which imports every module of a package so decorators run; and `smalldi.concurrency` with the `@synchronized` and `@threadsafe` lock decorators.
+
+## Docs
+
+- [README](https://github.com/0xf104a/smalldi/blob/master/README.md): usage examples and the library structure
+- [Singletons](https://github.com/0xf104a/smalldi/blob/master/README.md#singletons): lazy instantiation, exactly once, and the module reload warning
+- [Injector.singletons_available (deprecated)](https://github.com/0xf104a/smalldi/blob/master/README.md#injectorsingletons_available-deprecated): the deprecated snapshot and what reading it does
+- [Interfaces](https://github.com/0xf104a/smalldi/blob/master/README.md#interfaces): `@Injector.interface`, `@Injector.implements` and `Provide[Interface]`
+- [Overrides](https://github.com/0xf104a/smalldi/blob/master/README.md#overrides): `@Injector.override` for singletons and interfaces, the non-transitivity rules
+- [Freezing](https://github.com/0xf104a/smalldi/blob/master/README.md#freezing): what freezes a target and `SingletonFrozenError`
+- [Threads](https://github.com/0xf104a/smalldi/blob/master/README.md#threads): threading guarantees and the undetected deadlock cases
+- [Container](https://github.com/0xf104a/smalldi/blob/master/README.md#container): collecting components in a singleton container
+- [Concurrency](https://github.com/0xf104a/smalldi/blob/master/README.md#concurrency): the `@synchronized` and `@threadsafe` decorators and their limitations
+- [Collector](https://github.com/0xf104a/smalldi/blob/master/README.md#collector): importing a package's modules to run their decorators
+- [CHANGELOG](https://github.com/0xf104a/smalldi/blob/master/CHANGELOG.md): changes per release, including what 0.3.0 changes for 0.2.0 users
+- [smalldi/__init__.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/__init__.py): `Injector`, its decorators, `get_instance`, and the deprecated `singletons_available`
+- [smalldi/_singleton.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/_singleton.py): `LazySingleton`, delegation to an override, freezing, `SingletonFrozenError`
+- [smalldi/_interfaces.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/_interfaces.py): interface bindings to implementations and overrides
+- [smalldi/annotation.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/annotation.py): the `Provide[T]` annotation
+- [smalldi/container.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/container.py): `Container` and `ComponentRegistration`
+- [smalldi/collector.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/collector.py): `Collector.collect_from_package`
+- [smalldi/concurrency.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/concurrency.py): `@synchronized`, `@threadsafe` and the `mutex` helper
+- [smalldi/decorator.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/decorator.py): `staticclass`
+- [smalldi/atomic.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/atomic.py): `AtomicSet`
+- [smalldi/wrappers.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/wrappers.py): compatibility alias of `smalldi.decorator`
+- [pyproject.toml](https://github.com/0xf104a/smalldi/blob/master/pyproject.toml): package metadata, `requires-python` and the empty dependency list
+
+## Optional
+
+- [test_override_rules.py](https://github.com/0xf104a/smalldi/blob/master/src/tests/test_override_rules.py): specification of singleton overrides, non-transitivity, freezing and circular dependencies
+- [test_interface_bindings.py](https://github.com/0xf104a/smalldi/blob/master/src/tests/test_interface_bindings.py): specification of interface implementations, overrides and freezing
+- [test_injector_concurrency.py](https://github.com/0xf104a/smalldi/blob/master/src/tests/test_injector_concurrency.py): specification of threading behaviour, including the skipped cross-thread cycle case
