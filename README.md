@@ -399,7 +399,12 @@ def main(machine: Provide[CoffeeMachine]) -> int:
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except ValueError as e:
+        # Raised by a caffeine computer that refuses to serve the requested coffee
+        print(f"{type(e).__name__}: {e}")
+        sys.exit(1)
 ```
 
 </details>
