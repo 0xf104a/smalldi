@@ -1,8 +1,4 @@
 # Changelog
-## Unreleased
-### Added
-* Conditional overrides: `@Injector.override(Target, when=...)` applies only when `when()` returns `True`; when it returns `False`, the decorator does not bind an override and leaves existing singleton/interface bindings unchanged
-
 ## 0.3.0
 ### Breaking changes
 * `@Injector.singleton` no longer instantiates the class when it is applied: the instance is created on first use, at
@@ -28,6 +24,9 @@
 * Override validation, checked before anything is bound: the target must be a registered singleton or interface, the
   override a registered singleton and a subclass of the target, a class can't override itself, and each target has at
   most one override (a second one raises `RuntimeError` for a singleton target and `TypeError` for an interface target)
+* Conditional overrides: `@Injector.override(Target, when=...)` applies only when `when()` returns `True`; `when` is
+  called once, when the decorator is applied, and when it returns `False` the decorator binds nothing and leaves
+  existing bindings unchanged
 * Overrides are not transitive: an override can't be overridden and an overridden singleton can't become an override,
   both raise `TypeError`. An interface whose implementation is overridden resolves to the implementation's override,
   which is a single delegation hop, not a chain

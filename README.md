@@ -7,6 +7,9 @@ SmallDI is built around three features: [singletons](#singletons), [containers](
 [interfaces](#interfaces).
 
 # Singletons
+A singleton is a class with exactly one instance, created on first use and passed to every function that
+asks for it with `Provide[T]`.
+
 ## Example
 <details>
 <summary>Meowing and purring services</summary>
@@ -82,9 +85,9 @@ A singleton whose constructor requires itself, directly or through its dependenc
 singleton being constructed, deadlock instead and aren't detected.
 
 > [!WARNING]
-> Every class is registered once. Registering a class twice, or registering a class with the same module and
-> qualified name (as happens after `importlib.reload`), raises `TypeError`. DI is set up once per process;
-> module reloading isn't supported.
+> Every class is registered once: registering the same class twice raises `TypeError`. A reloaded module
+> (`importlib.reload`) defines new class objects, which are registered as additional singletons next to the old
+> ones without an error. DI is set up once per process; module reloading isn't supported.
 
 ## Provide
 `Provide[T]` is an annotation for injector telling it that instead of this argument
@@ -97,9 +100,11 @@ for a duplicate argument.
 Instances are meant to be reached through injection only. `Injector.singletons_available`, a read-only mapping of
 every registered singleton class to its instance, is kept for compatibility and emits a `DeprecationWarning` when
 read; it is planned to be removed in 1.0.0. Reading it creates every singleton that doesn't exist yet, so it freezes
-the whole registry. It used to be a plain dict; registering or removing singletons through it is no longer possible.
+the whole registry. Assigning to an item of the mapping raises `TypeError`.
 
 # Containers
+A container is a singleton that collects related classes or functions registered with `@MyContainer.component`.
+
 ## Example
 <details>
 <summary>Catnip flavours</summary>
@@ -123,8 +128,8 @@ class Catnip(ABC):
 class CatnipContainer(Container):
     def get_all_flavours(self) -> list[str]:
         flavours = list()
-        for registration in self._get_components():
-            flavours.append(registration.component().flavour)
+        for catnip in self._get_components():
+            flavours.append(catnip().flavour)
         return flavours
 
 @CatnipContainer.component
@@ -168,12 +173,13 @@ Registering the first component creates the container instance, so a container c
 `@MyContainer.component` go to the overriding container's instance.
 
 ## `Container._get_components`
-The container expose protected method `_get_components` which returns all components registered in the container 
-in form of iterable of [registrations](#componentregistration).
+The container exposes protected method `_get_components` which returns an iterator over all classes and functions
+registered in the container, in registration order. Their metadata is kept in [registrations](#componentregistration).
 
-## `Container._on_component_registered`
-The container have protected method `_on_component_registered` which is called every time a new component is registered
-in the container.
+## `Container._on_component_register`
+The container has protected method `_on_component_register(registration)` which is called with the
+[registration](#componentregistration) every time a new component is registered in the container. Override it to react
+to registrations; the default does nothing.
 
 ## ComponentRegistration
 `ComponentRegistration` is a dataclass which holds information about registered component which
@@ -183,6 +189,9 @@ consists of:
 * `kwargs`: keyword arguments passed to `@MyContainer.component` during registration
 
 # Interfaces
+An interface is an abstract class that code depends on instead of a concrete singleton; a singleton implements it,
+and an override can replace that implementation without changing the code that injects it.
+
 ## Example
 <details>
 <summary>Cohee-Neko, Kansai-Neko and Ootani in disguise</summary>
@@ -403,8 +412,8 @@ Rules:
 * Interfaces must be abstract classes (with at least one abstract method), so a class can't be both an interface and
   a singleton.
 * Interfaces aren't listed in `Injector.singletons_available`, only their implementations are.
-* Like singletons, an interface is registered once: registering it again (or a reloaded copy of it) raises
-  `TypeError`. Repeating `@Injector.implements` with the same singleton is a no-op.
+* Like singletons, an interface is registered once: registering the same class again raises `TypeError`. Repeating
+  `@Injector.implements` raises `RuntimeError` like any second implementation, even with the same singleton.
 
 ## Overrides
 Overrides apply to interfaces and to [singletons](#singletons) alike.
@@ -446,8 +455,8 @@ class OotaniCoffeeMachine(CoffeeMachine):
 
 </details>
 
-`Provide[CaffeineComputer]` then receives the `CoheeNekoXY71` instance and `Provide[CoffeeMachine]` the
-`OotaniCoffeeMachine` instance: the same objects `Provide[CoheeNekoXY71]` and `Provide[OotaniCoffeeMachine]` receive.
+`Provide[CaffeineComputer]` then receives the `CoheeNekoXX71` instance and `Provide[CoffeeMachine]` the
+`OotaniCoffeeMachine` instance: the same objects `Provide[CoheeNekoXX71]` and `Provide[OotaniCoffeeMachine]` receive.
 
 An override may be conditional: `@Injector.override(what, when=condition)` takes a callable with no arguments.
 `condition` is called once, when the decorator is applied, that is at import time. If it returns `False`, the
@@ -467,8 +476,8 @@ Rules:
 * Overrides are not transitive: an override can't be overridden, and an overridden singleton can't become an
   override. Both raise `TypeError`.
 * Each interface or singleton may have only one override, so it is unambiguous what gets injected: a second override
-  of an interface raises `TypeError`, a second override of a singleton raises `RuntimeError`. Repeating the same
-  override is a no-op.
+  of an interface raises `TypeError`, a second override of a singleton raises `RuntimeError`, even when it repeats the
+  same class.
 * Targets are *frozen* once an instance was requested through them, even if creating it failed, and overriding a
   frozen target raises `SingletonFrozenError`:
   * an interface the first time `Provide[Interface]` is resolved, or when `Injector.singletons_available` is read. Injecting

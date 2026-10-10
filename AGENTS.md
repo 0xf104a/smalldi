@@ -45,4 +45,4 @@ Circular dependencies are detected within one thread and raise `RuntimeError`. T
 - Tests use the public API only. The three specification files define the semantics: `src/tests/test_override_rules.py`, `src/tests/test_interface_bindings.py` and `src/tests/test_injector_concurrency.py`. Where the library disagrees with them, the library is what changes.
 - Docs describe current behaviour only. README, `llms.txt` and this file contain no development history (no "now", "no longer", "used to", "previously"); history lives in `CHANGELOG.md`.
 - README examples start with one plain technical sentence stating the concept, then the story example, then a `Rules:` list in plain technical language with no story in it. Every example runs as-is; error cases are `try/except` blocks printing the caught exception type.
-- Cast for README examples: Pusheen (a chubby grey tabby who loves snacks, cookies and naps; siblings Stormy and Pip) 
+- Cast for README examples: Pusheen (a chubby grey tabby who loves snacks, cookies and naps; siblings Stormy and Pip) is the permanent cast.
