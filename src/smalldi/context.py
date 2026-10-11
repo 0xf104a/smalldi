@@ -19,7 +19,9 @@ class InjectionSubcontextType(enum.Enum):
     STACK = enum.auto()  # Current default implementations type becomes new default implementations, but current override types become new default impls too
 
 
-class InjectionContext:  # Thread UNSAFE. Use via Injector
+# One InjectionContext may be shared between threads (PRESERVE, SHALLOW, ContextAwareThread);
+# it is safe only because every access goes through Injector under its class mutex.
+class InjectionContext:
     # Case (1): same as Injector's one
     def __init__(self, inherited_singletons: dict[type, LazySingleton] | None = None,
                  interfaces: InterfaceResolver | None = None):

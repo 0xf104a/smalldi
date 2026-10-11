@@ -1,3 +1,5 @@
+from typing import Hashable
+
 from smalldi.context import InjectionContext
 from smalldi.concurrency import threadsafe
 
@@ -13,14 +15,14 @@ class ContextTree:
     def __init__(self, root_context: InjectionContext):
         self.root = root_context
         self._root_node = _ContextTreeNode(root_context, None)
-        self._context_slice: dict = dict()
+        self._context_slice: dict[Hashable, _ContextTreeNode] = dict()
 
     @threadsafe
-    def get_current_node_for_id(self, slice_id) -> InjectionContext:
+    def current_context_for(self, slice_id: Hashable) -> InjectionContext:
         return self._context_slice.get(slice_id, self._root_node).context
 
     @threadsafe
-    def finish_context_for(self, slice_id, expected_node: _ContextTreeNode):
+    def finish_context_for(self, slice_id: Hashable, expected_node: _ContextTreeNode):
         node = self._context_slice.get(slice_id)
         if node is not expected_node:
             raise RuntimeError(f"Context to finish is not the current context of slice id {slice_id}")
@@ -32,7 +34,7 @@ class ContextTree:
             self._context_slice[slice_id] = node.parent
 
     @threadsafe
-    def add_context_for(self, slice_id, ctx: InjectionContext) -> _ContextTreeNode:
+    def add_context_for(self, slice_id: Hashable, ctx: InjectionContext) -> _ContextTreeNode:
         parent = self._context_slice.get(slice_id, self._root_node)
         node = _ContextTreeNode(ctx, parent)
         self._context_slice[slice_id] = node

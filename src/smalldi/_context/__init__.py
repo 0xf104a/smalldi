@@ -48,7 +48,7 @@ class InjectionContextRegistry:
 
     @property
     def current_context(self) -> InjectionContext:
-        return self._tree.get_current_node_for_id(self._slice())
+        return self._tree.current_context_for(self._slice())
 
     def push_context(self, context: InjectionContext) -> object:
         slice_obj = self._slice()
