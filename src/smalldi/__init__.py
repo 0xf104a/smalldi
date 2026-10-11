@@ -27,7 +27,7 @@ from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = ["Injector", "Provide", "SingletonFrozenError"]
 
 
@@ -206,13 +206,13 @@ class Injector:
                         kwargs[argname] = cls.get_instance(_tp)
                 return await fn(*args, **kwargs)
             return wrapped_fn
-
-        @functools.wraps(fn)
-        def wrapped_fn(*args, **kwargs):
-            for argname, _tp in name2type.items():
-                if argname not in kwargs:
-                    kwargs[argname] = cls.get_instance(_tp)
-            return fn(*args, **kwargs)
+        else:
+            @functools.wraps(fn)
+            def wrapped_fn(*args, **kwargs):
+                for argname, _tp in name2type.items():
+                    if argname not in kwargs:
+                        kwargs[argname] = cls.get_instance(_tp)
+                return fn(*args, **kwargs)
         return wrapped_fn
 
     @threadsafe
