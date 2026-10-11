@@ -1,4 +1,12 @@
 # Small DI
+[![PyPI](https://img.shields.io/pypi/v/smalldi)](https://pypi.org/project/smalldi/)
+[![Python versions](https://img.shields.io/pypi/pyversions/smalldi)](https://pypi.org/project/smalldi/)
+[![CI](https://github.com/0xf104a/smalldi/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/0xf104a/smalldi/actions/workflows/ci.yml)
+[![Free-threading](https://img.shields.io/badge/free--threading-3.14t%20%7C%203.15t-blue)](https://py-free-threading.github.io/)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](https://github.com/0xf104a/smalldi/blob/master/pyproject.toml)
+[![License](https://img.shields.io/pypi/l/smalldi)](https://github.com/0xf104a/smalldi/blob/master/LICENSE)
+
+
 The smallest dependency injection mechanism possible in python.
 SmallDI provides you with an intuitive and simple interface for doing dependency
 injections in your project.
