@@ -136,6 +136,35 @@ def test_R7_reset_override_does_not_leak_into_parent():
         assert after is parent_instance
 
 
+def test_R9_reset_keeps_one_instance_for_multi_target_override():
+    """O overrides B1 and B2: inside RESET, B1, B2 and O resolve to one fresh instance of O."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        @Injector.singleton
+        class B1:
+            pass
+
+        @Injector.singleton
+        class B2:
+            pass
+
+        @Injector.override(B2)
+        @Injector.override(B1)
+        @Injector.singleton
+        class O(B1, B2):
+            pass
+
+        parent_instance = Injector.get_instance(O)
+
+        with Injector.context(InjectionSubcontextType.RESET):
+            b1 = Injector.get_instance(B1)
+            b2 = Injector.get_instance(B2)
+            o = Injector.get_instance(O)
+            assert b1 is b2
+            assert b2 is o
+            assert type(o) is O
+            assert o is not parent_instance
+
+
 def test_R8_reset_keeps_interface_override():
     """Interface control case: an interface override set in the parent is seen inside RESET."""
     with Injector.context(InjectionSubcontextType.RESET):

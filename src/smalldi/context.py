@@ -40,14 +40,14 @@ class InjectionContext:  # Thread UNSAFE. Use via Injector
 
     # Case (2): new JIT creation, so singletons unfrozen
     def resetted(self) -> 'InjectionContext':
-        new_singletons = dict()
-        for key in self.singletons_available:
-            singleton = self.singletons_available[key]
-            if key in new_singletons:
-                continue  # Overriden and points to proper LazySingleton
-            new_singletons[key] = singleton.clone()
-            if singleton.override_cls is not None:
-                new_singletons[singleton.override_cls] = new_singletons[key]
+        new_singletons: dict[type, LazySingleton] = dict()
+        clones_by_id: dict[int, LazySingleton] = dict()
+        for key, singleton in self.singletons_available.items():
+            cloned = clones_by_id.get(id(singleton))
+            if cloned is None:
+                cloned = singleton.clone()
+                clones_by_id[id(singleton)] = cloned
+            new_singletons[key] = cloned
         return self.__class__(new_singletons, self.interface_resolver.rewired(new_singletons))
 
     def stacked(self) -> 'InjectionContext':
