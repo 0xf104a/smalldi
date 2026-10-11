@@ -50,13 +50,13 @@ class InjectionContextRegistry:
     def current_context(self) -> InjectionContext:
         return self._tree.get_current_node_for_id(self._slice())
 
-    def push_context(self, context: InjectionContext):
+    def push_context(self, context: InjectionContext) -> object:
         slice_obj = self._slice()
         self._watch(slice_obj)
-        self._tree.add_context_for(slice_obj, context)
+        return self._tree.add_context_for(slice_obj, context)
 
-    def pop_context(self):
-        self._tree.finish_context_for(self._slice())
+    def pop_context(self, token: object):
+        self._tree.finish_context_for(self._slice(), token)
 
     def _watch(self, slice_obj: ExecutionSlice):
         with self._watched_mutex:
@@ -69,8 +69,8 @@ class InjectionContextRegistry:
         with self._watched_mutex:
             self._watched.discard(slice_obj)
         leaked = 0
-        while self._tree.get_current_node_for_id(slice_obj) is not self._tree.root:
-            self._tree.finish_context_for(slice_obj)
+        while (node := self._tree._context_slice.get(slice_obj)) is not None:
+            self._tree.finish_context_for(slice_obj, node)
             leaked += 1
         if leaked:
             warnings.warn(

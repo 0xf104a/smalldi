@@ -1,6 +1,7 @@
 import copy
 import enum
 from contextlib import AbstractContextManager
+from typing import Callable
 
 from smalldi.concurrency import threadsafe
 from smalldi._singleton import LazySingleton
@@ -71,11 +72,24 @@ class InjectionContext:  # Thread UNSAFE. Use via Injector
 
 
 class InjectionContextManager(AbstractContextManager):
-    def __init__(self, injector: 'Injector'):
+    def __init__(self, injector: 'Injector', context_factory: Callable[[], InjectionContext]):
         self.injector = injector
+        self._context_factory = context_factory
+        self._token: object | None = None
+
+    def __enter__(self) -> InjectionContext:
+        with self.injector.__class_mutex__:
+            if self._token is not None:
+                raise RuntimeError("Injection context manager was already entered")
+            context = self._context_factory()
+            self._token = self.injector._context_registry.push_context(context)
+        return context
 
     def __exit__(self, _exc_type, _exc_value, _traceback, /):
-        self.injector.finalize_context()
+        with self.injector.__class_mutex__:
+            if self._token is None:
+                raise RuntimeError("Injection context manager was exited without being entered")
+            self.injector._context_registry.pop_context(self._token)
 
 class ContextStackManager:
     def __init__(self, root_context: 'InjectionContext'):

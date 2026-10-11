@@ -35,7 +35,6 @@ def _ensure_injector_unlocked():
 def reset_injector():
     """Reset Injector state before and after each test"""
     _ensure_injector_unlocked()
-    current_context = Injector.context()
-    yield
-    current_context.__exit__(None, None, None)
+    with Injector.context():
+        yield
 

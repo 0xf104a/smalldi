@@ -411,36 +411,26 @@ class Injector:
         """
         return target in cls._get_singletons_available()
 
-    @threadsafe
     @classmethod
     def context(cls, kind: InjectionSubcontextType = InjectionSubcontextType.RESET) -> InjectionContextManager:
-        new_context = None
-        current_context = cls._context_registry.current_context
         match kind:
             case InjectionSubcontextType.RESET:
-                new_context = current_context.resetted()
+                factory = lambda: cls._context_registry.current_context.resetted()
             case InjectionSubcontextType.PRESERVE:
-                new_context = current_context
+                factory = lambda: cls._context_registry.current_context
             case InjectionSubcontextType.EMPTY:
-                new_context = InjectionContext.empty()
+                factory = InjectionContext.empty
             case InjectionSubcontextType.SHALLOW:
-                new_context = current_context.shallow_copied()
+                factory = lambda: cls._context_registry.current_context.shallow_copied()
             case InjectionSubcontextType.STACK:
-                new_context = current_context.stacked()
+                factory = lambda: cls._context_registry.current_context.stacked()
             case _:
                 raise ValueError(f"Unknown context kind: {kind}")
-        return cls.foreign_context(new_context)
+        return InjectionContextManager(cls, factory)
 
-    @threadsafe
     @classmethod
-    def foreign_context(cls, ctx: InjectionContext):
-        cls._context_registry.push_context(ctx)
-        return InjectionContextManager(cls)
-
-    @threadsafe
-    @classmethod
-    def finalize_context(cls):
-        cls._context_registry.pop_context()
+    def foreign_context(cls, ctx: InjectionContext) -> InjectionContextManager:
+        return InjectionContextManager(cls, lambda: ctx)
 
     @threadsafe
     @classmethod

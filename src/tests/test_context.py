@@ -16,7 +16,7 @@ import abc
 import pytest
 
 from smalldi import Injector, Provide, SingletonFrozenError
-from smalldi.context import InjectionSubcontextType
+from smalldi.context import InjectionContext, InjectionSubcontextType
 
 
 def _base_and_override():
@@ -307,3 +307,82 @@ def test_X1_stack_injected_function_receives_override():
 
         with Injector.context(InjectionSubcontextType.STACK):
             assert type(use()) is Over
+
+
+# ---------------------------------------------------------------------------
+# Context manager lifecycle
+# ---------------------------------------------------------------------------
+
+def test_L1_context_call_without_with_pushes_nothing():
+    """Calling Injector.context() without `with` leaves the current context unchanged."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        before = Injector.get_context()
+        Injector.context(InjectionSubcontextType.RESET)
+        assert Injector.get_context() is before
+        Injector.foreign_context(InjectionContext())
+        assert Injector.get_context() is before
+
+
+def test_L2_nested_contexts_restore_each_level():
+    """Nested `with` blocks expose their own context and restore the enclosing one on exit."""
+    with Injector.context(InjectionSubcontextType.RESET) as outer:
+        assert Injector.get_context() is outer
+        with Injector.context(InjectionSubcontextType.RESET) as middle:
+            assert Injector.get_context() is middle
+            with Injector.context(InjectionSubcontextType.RESET) as inner:
+                assert Injector.get_context() is inner
+            assert Injector.get_context() is middle
+        assert Injector.get_context() is outer
+        assert middle is not outer and inner is not middle
+
+
+def test_L3_exiting_outer_while_inner_open_raises():
+    """Exiting an outer manager while an inner one is open raises and leaves the stack unchanged."""
+    with Injector.context(InjectionSubcontextType.RESET) as base:
+        outer = Injector.context(InjectionSubcontextType.RESET)
+        inner = Injector.context(InjectionSubcontextType.RESET)
+        outer_ctx = outer.__enter__()
+        inner_ctx = inner.__enter__()
+
+        with pytest.raises(RuntimeError):
+            outer.__exit__(None, None, None)
+        assert Injector.get_context() is inner_ctx
+
+        inner.__exit__(None, None, None)
+        assert Injector.get_context() is outer_ctx
+        outer.__exit__(None, None, None)
+        assert Injector.get_context() is base
+
+
+def test_L4_entering_same_manager_twice_raises():
+    """A manager can be entered once; a second __enter__ raises and pushes nothing."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        manager = Injector.context(InjectionSubcontextType.RESET)
+        with manager as ctx:
+            with pytest.raises(RuntimeError):
+                manager.__enter__()
+            assert Injector.get_context() is ctx
+
+
+def test_L4_exit_without_enter_raises():
+    """Exiting a manager that was never entered raises and pops nothing."""
+    with Injector.context(InjectionSubcontextType.RESET) as base:
+        manager = Injector.context(InjectionSubcontextType.RESET)
+        with pytest.raises(RuntimeError):
+            manager.__exit__(None, None, None)
+        assert Injector.get_context() is base
+
+
+def test_L5_reset_snapshot_is_taken_at_enter():
+    """A singleton registered between creating and entering a RESET manager is in the new context."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        manager = Injector.context(InjectionSubcontextType.RESET)
+
+        @Injector.singleton
+        class Late:
+            pass
+
+        with manager:
+            assert Injector.is_singleton(Late)
+
+        assert Injector.is_singleton(Late)

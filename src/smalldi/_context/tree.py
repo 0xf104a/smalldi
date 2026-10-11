@@ -20,8 +20,10 @@ class ContextTree:
         return self._context_slice.get(slice_id, self._root_node).context
 
     @threadsafe
-    def finish_context_for(self, slice_id):
+    def finish_context_for(self, slice_id, expected_node: _ContextTreeNode):
         node = self._context_slice.get(slice_id)
+        if node is not expected_node:
+            raise RuntimeError(f"Context to finish is not the current context of slice id {slice_id}")
         if node is None:
             raise ValueError(f"Context for slice id {slice_id} not found")
         if node.parent is self._root_node:
@@ -30,6 +32,8 @@ class ContextTree:
             self._context_slice[slice_id] = node.parent
 
     @threadsafe
-    def add_context_for(self, slice_id, ctx: InjectionContext):
+    def add_context_for(self, slice_id, ctx: InjectionContext) -> _ContextTreeNode:
         parent = self._context_slice.get(slice_id, self._root_node)
-        self._context_slice[slice_id] = _ContextTreeNode(ctx, parent)
+        node = _ContextTreeNode(ctx, parent)
+        self._context_slice[slice_id] = node
+        return node
