@@ -236,17 +236,21 @@ class LazySingleton:
         return self._frozen
 
     @threadsafe
-    def clean_copy(self):
-        return self.__class__(
-            self._cls,
-            self._override
-        )
-
-    @threadsafe
     def stacked(self):
         current_impl = None
         if self._override is not None:
             current_impl = self._override
         else:
             current_impl = self._cls
-        return self.__class__(current_impl)
+        clone = self.__class__(current_impl)
+        clone._frozen = self._frozen
+        return clone
+
+    @threadsafe
+    def clone(self):
+        clone = self.__class__(
+            self._cls,
+            self._override
+        )
+        clone._is_override = clone._is_override
+        return clone

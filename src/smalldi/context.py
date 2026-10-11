@@ -42,7 +42,11 @@ class InjectionContext:  # Thread UNSAFE. Use via Injector
         new_singletons = dict()
         for key in self.singletons_available:
             singleton = self.singletons_available[key]
-            new_singletons[key] = LazySingleton(singleton.implementation_cls, singleton.override_cls)
+            if key in new_singletons:
+                continue # Overriden and points to proper LazySingleton
+            new_singletons[key] = singleton.clone()
+            if singleton.override_cls is not None:
+                new_singletons[singleton.override_cls] = new_singletons[key]
         return self.__class__(new_singletons, self.interface_resolver.rewired(new_singletons))
 
     def stacked(self) -> 'InjectionContext':
