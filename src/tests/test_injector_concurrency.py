@@ -21,6 +21,7 @@ from smalldi import Injector, Provide, SingletonFrozenError
 from smalldi._singleton import LazySingleton
 from smalldi.container import Container
 from smalldi.context import InjectionSubcontextType
+from smalldi.thread import ContextAwareThread
 
 TIMEOUT = 2.0
 ITERATIONS = 50
@@ -922,7 +923,7 @@ class _Worker:
         self.result = None
         self.error = None
         self._fn = fn
-        self.thread = threading.Thread(target=self._run, name=name, daemon=True)
+        self.thread = ContextAwareThread(target=self._run, name=name, daemon=True)
         self.thread.start()
 
     def _run(self):
@@ -935,7 +936,6 @@ class _Worker:
         self.thread.join(TIMEOUT)
         assert not self.thread.is_alive(), f"deadlock: thread still alive after {TIMEOUT}s"
         return self
-
 
 def _pause_after_lookup(monkeypatch, cls, looked_up, go):
     """
