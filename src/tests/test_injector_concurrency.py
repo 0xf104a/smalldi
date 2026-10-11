@@ -1096,6 +1096,7 @@ def test_override_racing_constructor_that_resolves_a_dependency_does_not_deadloc
     with Injector.context(InjectionSubcontextType.RESET):
         entered, resolve, release = threading.Event(), threading.Event(), threading.Event()
         released = []
+        built = _Counter()
 
         @Injector.singleton
         class Dep:
@@ -1108,6 +1109,7 @@ def test_override_racing_constructor_that_resolves_a_dependency_does_not_deadloc
         @Injector.singleton
         class Over(Base):
             def __init__(self):
+                built.increment()
                 entered.set()
                 resolve.wait(TIMEOUT)
                 self.dep = Injector.get_instance(Dep)
@@ -1124,4 +1126,5 @@ def test_override_racing_constructor_that_resolves_a_dependency_does_not_deadloc
         assert building.error is None
         assert released == [True]
         assert building.result.dep is Injector.get_instance(Dep)
-        assert overriding.error is None or isinstance(overriding.error, SingletonFrozenError)
+        assert isinstance(overriding.error, SingletonFrozenError)
+        assert built.value == 1
