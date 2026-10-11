@@ -1,4 +1,3 @@
-import pytest
 from typing import List, Dict, Optional
 
 from smalldi import Injector

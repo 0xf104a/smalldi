@@ -11,6 +11,9 @@ test instead of hanging the run. Each concurrency test is additionally run in
 a bounded worker thread: a lock left behind by a deadlocked thread of an
 earlier test then fails the next test fast instead of blocking it.
 """
+# Closures defined inside a test's iteration loop capture that iteration's locals on purpose
+# and are called before the next iteration starts.
+# ruff: noqa: B023
 import threading
 import time
 from abc import ABC, abstractmethod

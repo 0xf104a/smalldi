@@ -75,7 +75,7 @@ def test_singletons_available_deprecated(reset_injector):
     with pytest.warns(DeprecationWarning, match="1.0.0"):
         view = Injector.singletons_available
     with pytest.warns(DeprecationWarning):
-        Injector.singletons_available
+        _ = Injector.singletons_available
 
     assert set(view) == {TestService, FakeService}
     assert type(view[TestService]) is FakeService

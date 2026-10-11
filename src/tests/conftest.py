@@ -2,10 +2,8 @@ import threading
 import warnings
 
 import pytest
-from typing import Any, Dict
 
 from smalldi import Injector
-from smalldi._interfaces import InterfaceResolver
 
 # How long a test waits for the injector lock before concluding that a thread of an
 # earlier test deadlocked while holding it

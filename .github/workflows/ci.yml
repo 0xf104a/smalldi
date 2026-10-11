@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ "3.11", "3.12", "3.13", "3.14", "3.15", "3.14t", "3.15t", "graalpy-24.2", "graalpy-25.2" ]
+        include:
+          - os: windows-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.14"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert the GIL is disabled
+        if: endsWith(matrix.python-version, 't')
+        run: python -c "import sys; assert not sys._is_gil_enabled()"
+      - name: Install pytest
+        run: python -m pip install pytest
+      - name: Run the tests
+        run: cd src && python -m pytest -q
+
+  stress:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.14t", "3.15t" ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Assert the GIL is disabled
+        run: python -c "import sys; assert not sys._is_gil_enabled()"
+      - name: Install pytest and pytest-repeat
+        run: python -m pip install pytest pytest-repeat
+      - name: Repeat the concurrency tests
+        run: cd src && python -m pytest -q --count 20 tests/test_injector_concurrency.py tests/test_concurrency.py
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install ruff
+        run: python -m pip install ruff==0.17.0
+      - name: Run ruff
+        run: ruff check src --select F,PLE,B006,B008,B017,B018,B023
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install mypy
+        run: python -m pip install mypy==2.4.0
+      - name: Run mypy
+        run: mypy src/smalldi
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install build and twine
+        run: python -m pip install build twine
+      - name: Build the distributions
+        run: python -m build
+      - name: Check the distributions
+        run: twine check dist/*
+      - name: Install the wheel into a fresh venv
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install dist/*.whl
+      - name: Import the installed package from outside the repository
+        working-directory: ${{ runner.temp }}
+        run: '"$RUNNER_TEMP/venv/bin/python" -c "import smalldi, smalldi.context, smalldi.thread, smalldi.asynchronous, smalldi._context.tree"'
+      - name: Check the version against pyproject.toml and CHANGELOG.md
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          heading="$(grep -m 1 '^## ' CHANGELOG.md)"
+          installed="$(cd "$RUNNER_TEMP" && "$RUNNER_TEMP/venv/bin/python" -c 'import smalldi; print(smalldi.__version__)')"
+          echo "pyproject.toml: $version; smalldi.__version__: $installed; CHANGELOG.md: $heading"
+          test "$installed" = "$version"
+          test "$heading" = "## Unreleased" || test "$heading" = "## $version"
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install mermaid and jsdom
+        run: npm install --no-save --no-package-lock mermaid@12.0.0 jsdom@30.1.1
+      - name: Check the documentation
+        run: python .github/scripts/check_docs.py

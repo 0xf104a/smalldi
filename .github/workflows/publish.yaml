@@ -26,6 +26,17 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Check that the release tag matches the package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          tag="${RELEASE_TAG#v}"
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "$tag" != "$version" ]; then
+            echo "Release tag $tag differs from the version $version in pyproject.toml"
+            exit 1
+          fi
+
       - name: Build release distributions
         run: |
           # NOTE: put your own distribution build steps here.
