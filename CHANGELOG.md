@@ -1,4 +1,13 @@
 # Changelog
+## Unreleased
+### Fixed
+* An instance request and the freezing of what it looks up are one step under the injector's lock: an override that
+  races a request for its target or for the overriding class is refused with `SingletonFrozenError` instead of
+  succeeding after the request was made, and no constructor runs inside a `LazySingleton` the override discarded
+* `@Injector.override(Target)` raises `SingletonFrozenError` when the overriding class was requested but has no
+  instance, because its constructor is still running or failed; before, the override succeeded and the constructor
+  ran a second time. An overriding class whose instance exists shares it with the target, as before
+
 ## 0.3.0
 ### Breaking changes
 * `@Injector.singleton` no longer instantiates the class when it is applied: the instance is created on first use, at

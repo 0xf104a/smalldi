@@ -498,6 +498,9 @@ Rules:
   So declare overrides before anything injects their targets. Frozen means frozen: nothing rebinds a frozen
   target, the only binding still accepted is the first `@Injector.implements` of an interface that already has an
   override, since the override keeps winning.
+* A singleton target may be overridden by a class that was already injected: the target then shares that instance.
+  If the overriding class was requested but has no instance, because its constructor is still running or raised,
+  the override raises `SingletonFrozenError`.
 
 `SingletonFrozenError` can be imported from `smalldi`.
 

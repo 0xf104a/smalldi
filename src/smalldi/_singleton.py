@@ -35,9 +35,13 @@ class LazySingleton:
     which is overridden can't become an override.
 
     A `LazySingleton` is frozen once an instance was requested from it, even
-    if creating the instance then failed. A frozen singleton can't be
-    overridden anymore. A failed construction leaves no instance behind, so
-    the next `get_instance()` call runs the constructor again.
+    if creating the instance then failed. `Injector` freezes it with
+    `_freeze()` while it looks it up, under its class mutex, so the request
+    and the freeze are one step for every concurrent override. A frozen
+    singleton can't be overridden anymore, and a frozen singleton without an
+    instance, whose constructor is running or failed, can't become an
+    override. A failed construction leaves no instance behind, so the next
+    `get_instance()` call runs the constructor again.
 
     Two reentrant locks guard a `LazySingleton`. The state lock
     `__instance_mutex__` guards the bindings and the frozen flag; every method
@@ -84,6 +88,16 @@ class LazySingleton:
         :return: name of the registered class, or its repr if it has no name
         """
         return getattr(self._cls, "__name__", repr(self._cls))
+
+    @threadsafe
+    def _freeze(self) -> None:
+        """
+        Freezes the singleton without requesting its instance.
+
+        `Injector` calls it under its class mutex while it looks the singleton
+        up, before `get_instance()` is called outside that mutex.
+        """
+        self._frozen = True
 
     def get_instance(self) -> Any:
         """
@@ -134,14 +148,18 @@ class LazySingleton:
         All checks run before anything changes. `new` is not validated against
         the registered class: `Injector` checks that it is a registered subclass.
         If `previous`, the `LazySingleton` registered for `new` so far, is
-        frozen, this singleton becomes frozen and takes over its instance, so an
-        instance of `new` created before the override is shared instead of being
-        created again. `previous` is read under its own state lock; `Injector`
-        then discards it and registers this singleton for `new`.
+        frozen and has an instance, this singleton becomes frozen and takes over
+        that instance, so an instance of `new` created before the override is
+        shared instead of being created again. If `previous` is frozen without
+        an instance, because its constructor is running or failed, the override
+        is refused: its constructor would otherwise run again in this singleton.
+        `previous` is read under its own state lock; `Injector` then discards it
+        and registers this singleton for `new`.
 
         :param new: class to instantiate instead of `_cls`
         :param previous: `LazySingleton` so far registered for `new`, or None
-        :raises SingletonFrozenError: if this singleton is frozen
+        :raises SingletonFrozenError: if this singleton is frozen, or `previous` is frozen and has
+            no instance
         :raises RuntimeError: if this singleton already has an override class
         :raises TypeError: if this singleton is an override itself, or `new` is its registered class
         """
@@ -157,6 +175,10 @@ class LazySingleton:
         if previous is not None:
             with previous.__instance_mutex__:
                 frozen, instance = previous._frozen, previous._instance
+        if frozen and instance is None:
+            raise SingletonFrozenError(
+                f"Singleton {getattr(new, '__name__', repr(new))} was already frozen and has no instance: "
+                f"its constructor is running or failed")
         self._override = new
         self._is_override = True
         if frozen:

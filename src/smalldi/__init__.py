@@ -136,8 +136,12 @@ class Injector:
         Follows the interface's override or implementation, and freezes the
         singleton and the interface on the way, so neither can be overridden
         afterwards; an overridden singleton's `LazySingleton` creates the
-        override's instance. The class mutex is held only while
-        the singleton or interface binding is looked up.
+        override's instance. The class mutex is held only while the singleton
+        or interface binding is looked up and frozen together with the
+        `LazySingleton` it resolves to: an override decorator running
+        concurrently sees the request either entirely before it or not at all,
+        and no instance is ever built in a `LazySingleton` the override
+        discarded.
 
         :param tp: registered singleton class or interface
         :return: the instance
@@ -149,12 +153,11 @@ class Injector:
         """
         with cls.__class_mutex__:
             if cls._get_interface_resolver().is_interface(tp):
-                binding = cls._get_interface_resolver().get_binding(tp)
+                singleton = cls._get_interface_resolver().get_binding(tp).resolve()
             else:
-                binding = cls._get_singletons_available()[tp]
-        if isinstance(binding, LazySingleton):
-            return binding.get_instance()
-        return binding.get_impl()
+                singleton = cls._get_singletons_available()[tp]
+                singleton._freeze()
+        return singleton.get_instance()
 
     @classmethod
     def inject(cls, fn):
@@ -233,8 +236,10 @@ class Injector:
         registration and interface binding that referred to the replaced
         `LazySingleton` is rebound to the shared one, so a class overriding
         several singletons, or an interface as well, still has one instance.
-        If the replaced `LazySingleton` is frozen, the shared one takes over
-        its instance and frozen state.
+        If the replaced `LazySingleton` is frozen and has an instance, the
+        shared one takes over its instance and frozen state; if it is frozen
+        without an instance, because the overriding class's constructor is
+        running or failed, the override is refused.
 
         :param source_cls: registered singleton to override
         :return: decorator taking the overriding class and returning it unchanged
@@ -242,7 +247,8 @@ class Injector:
             registered singleton, the overriding class is not a subclass of `source_cls`,
             both are the same class, `source_cls` is an override itself, or the overriding
             class is already overridden
-        :raises SingletonFrozenError: from the decorator, if `source_cls` is frozen
+        :raises SingletonFrozenError: from the decorator, if `source_cls` is frozen, or the
+            overriding class is frozen and has no instance
         :raises RuntimeError: from the decorator, if `source_cls` is already overridden
         """
         @mutex(cls.__class_mutex__)
@@ -339,7 +345,9 @@ class Injector:
             is not a registered singleton or not a subclass of `what`, the override would form
             a chain, a class overrides itself, an interface is overridden twice, or the
             overriding class is the interface's implementation
-        :raises SingletonFrozenError: from the decorator, if `what` is frozen
+        :raises SingletonFrozenError: from the decorator, if `what` is frozen, or `what` is a
+            singleton and the overriding class is frozen without an instance (its constructor
+            is running or failed)
         :raises RuntimeError: from the decorator, if `what` is a singleton that is already overridden
         """
         if not when():

@@ -20,10 +20,11 @@ class _LazyInterfaceImpl:
     override or implementation at that moment; a frozen binding accepts no
     override, and an implementation only if an override is in place.
 
-    The reentrant lock `__instance_mutex__` guards the binding. `override()`
-    and `implement()` hold it for the whole call through `@threadsafe`;
-    `get_impl()` holds it only to freeze the binding and pick the target, and
-    asks the target for its instance after releasing it.
+    The reentrant lock `__instance_mutex__` guards the binding. `override()`,
+    `implement()` and `resolve()` hold it for the whole call through
+    `@threadsafe`; `get_impl()` holds it only through `resolve()`, and asks
+    the target for its instance after releasing it. `Injector` calls
+    `resolve()` under its class mutex while it looks the interface up.
 
     :ivar interface: the abstract class
     :ivar implementation_singleton: `LazySingleton` declared with `@Injector.implements`, or None
@@ -106,25 +107,40 @@ class _LazyInterfaceImpl:
         if self.override_singleton is old:
             self.override_singleton = new
 
+    @threadsafe
+    def resolve(self) -> LazySingleton:
+        """
+        Freezes the binding and its target, and returns the target, without requesting an instance.
+
+        The target is the override, or the implementation if there is no
+        override. The binding is frozen first, so it stays frozen if it turns
+        out to be unbound.
+
+        :return: the `LazySingleton` to ask for the instance
+        :raises RuntimeError: if the interface has neither an override nor an implementation
+        """
+        self._frozen = True
+        target = self.override_singleton if self.override_singleton is not None else self.implementation_singleton
+        if target is None:
+            raise RuntimeError(f"Interface {self.interface.__name__!r} is not implemented")
+        target._freeze()
+        return target
+
     def get_impl(self) -> Any:
         """
         Returns the instance of the override, or of the implementation if there is no override.
 
-        The binding is frozen first, so it stays frozen if it turns out to be
-        unbound or the constructor fails. The binding's lock is released before
-        the target is asked for its instance.
+        The binding and its target are frozen first by `resolve()`, so they
+        stay frozen if the binding turns out to be unbound or the constructor
+        fails. The binding's lock is released before the target is asked for
+        its instance.
 
         :return: the instance
         :raises RuntimeError: if the interface has neither an override nor an implementation
         :raises RuntimeError: from `LazySingleton.get_instance()`, on a circular dependency
         :raises Exception: any exception raised by the constructor propagates unchanged
         """
-        with self.__instance_mutex__:
-            self._frozen = True
-            target = self.override_singleton if self.override_singleton is not None else self.implementation_singleton
-        if target is None:
-            raise RuntimeError(f"Interface {self.interface.__name__!r} is not implemented")
-        return target.get_instance()
+        return self.resolve().get_instance()
 
     def stacked(self) -> 'InterfaceResolver':
         new_instance = self.__class__(self.interface)

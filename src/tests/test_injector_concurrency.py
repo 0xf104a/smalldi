@@ -18,7 +18,9 @@ from abc import ABC, abstractmethod
 import pytest
 
 from smalldi import Injector, Provide, SingletonFrozenError
+from smalldi._singleton import LazySingleton
 from smalldi.container import Container
+from smalldi.context import InjectionSubcontextType
 
 TIMEOUT = 2.0
 ITERATIONS = 50
@@ -892,3 +894,234 @@ def test_concurrent_component_registration_in_container(reset_injector):
     registered = [registration.component for registration in registry.components]
     assert len(registered) == N
     assert set(registered) == set(components)
+
+
+# ---------------------------------------------------------------------------
+# Overrides racing an instance request of the classes they bind
+# ---------------------------------------------------------------------------
+
+PAUSED = "paused-after-lookup"
+
+
+class _Counter:
+    """Counts constructor calls under a lock."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.value = 0
+
+    def increment(self):
+        with self._lock:
+            self.value += 1
+
+
+class _Worker:
+    """Daemon thread recording the result or the exception of `fn`."""
+
+    def __init__(self, fn, name=None):
+        self.result = None
+        self.error = None
+        self._fn = fn
+        self.thread = threading.Thread(target=self._run, name=name, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        try:
+            self.result = self._fn()
+        except BaseException as exc:
+            self.error = exc
+
+    def join(self):
+        self.thread.join(TIMEOUT)
+        assert not self.thread.is_alive(), f"deadlock: thread still alive after {TIMEOUT}s"
+        return self
+
+
+def _pause_after_lookup(monkeypatch, cls, looked_up, go):
+    """
+    Pauses the thread named `PAUSED` between the injector's lookup of `cls` and
+    the `LazySingleton.get_instance()` call on the looked up singleton.
+    """
+    original = LazySingleton.get_instance
+
+    def paused_get_instance(self):
+        if threading.current_thread().name == PAUSED and self.implementation_cls is cls:
+            looked_up.set()
+            go.wait(TIMEOUT)
+        return original(self)
+
+    monkeypatch.setattr(LazySingleton, "get_instance", paused_get_instance)
+
+
+# R1
+def test_override_by_singleton_under_construction_is_refused():
+    """Overriding with a class whose constructor is in flight fails at once instead of building it twice."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        entered, release = threading.Event(), threading.Event()
+        built = _Counter()
+
+        @Injector.singleton
+        class Base:
+            pass
+
+        @Injector.singleton
+        class Over(Base):
+            def __init__(self):
+                built.increment()
+                entered.set()
+                release.wait(TIMEOUT)
+
+        building = _Worker(lambda: Injector.get_instance(Over))
+        assert entered.wait(TIMEOUT)
+        overriding = _Worker(lambda: Injector.override(Base)(Over)).join()
+        release.set()
+        building.join()
+
+        assert isinstance(overriding.error, SingletonFrozenError)
+        assert building.error is None
+        assert building.result is Injector.get_instance(Over)
+        assert built.value == 1
+        assert type(Injector.get_instance(Base)) is Base
+
+
+# R2
+def test_override_after_lookup_of_overriding_singleton_is_refused(monkeypatch):
+    """A singleton is frozen together with its lookup, so no thread builds it in a discarded LazySingleton."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        looked_up, go = threading.Event(), threading.Event()
+        built = _Counter()
+
+        @Injector.singleton
+        class Base:
+            pass
+
+        @Injector.singleton
+        class Over(Base):
+            def __init__(self):
+                built.increment()
+
+        _pause_after_lookup(monkeypatch, Over, looked_up, go)
+        requesting = _Worker(lambda: Injector.get_instance(Over), name=PAUSED)
+        assert looked_up.wait(TIMEOUT)
+        overriding = _Worker(lambda: Injector.override(Base)(Over)).join()
+        go.set()
+        requesting.join()
+
+        assert isinstance(overriding.error, SingletonFrozenError)
+        assert requesting.error is None
+        assert built.value == 1
+        assert requesting.result is Injector.get_instance(Over)
+        assert built.value == 1
+
+
+# R3
+def test_override_after_lookup_of_target_is_refused(monkeypatch):
+    """A target whose instance was requested is frozen from the request on, before its constructor runs."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        looked_up, go = threading.Event(), threading.Event()
+
+        @Injector.singleton
+        class Base:
+            pass
+
+        @Injector.singleton
+        class Over(Base):
+            pass
+
+        _pause_after_lookup(monkeypatch, Base, looked_up, go)
+        requesting = _Worker(lambda: Injector.get_instance(Base), name=PAUSED)
+        assert looked_up.wait(TIMEOUT)
+        overriding = _Worker(lambda: Injector.override(Base)(Over)).join()
+        go.set()
+        requesting.join()
+
+        assert isinstance(overriding.error, SingletonFrozenError)
+        assert requesting.error is None
+        assert type(requesting.result) is Base
+        assert Injector.get_instance(Base) is requesting.result
+        assert Injector.get_instance(Over) is not requesting.result
+
+
+# R4
+def test_override_by_singleton_with_completed_instance_shares_it():
+    """Overriding with a class whose instance exists already shares that instance with the target."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        built = _Counter()
+
+        @Injector.singleton
+        class Base:
+            pass
+
+        @Injector.singleton
+        class Over(Base):
+            def __init__(self):
+                built.increment()
+
+        over = Injector.get_instance(Over)
+        Injector.override(Base)(Over)
+
+        assert Injector.get_instance(Base) is over
+        assert Injector.get_instance(Over) is over
+        assert built.value == 1
+
+
+# R5
+def test_override_by_singleton_whose_constructor_failed_is_refused():
+    """A frozen singleton without an instance can't become an override, even after its constructor failed."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        built = _Counter()
+
+        @Injector.singleton
+        class Base:
+            pass
+
+        @Injector.singleton
+        class Over(Base):
+            def __init__(self):
+                built.increment()
+                raise ValueError("constructor failed")
+
+        with pytest.raises(ValueError):
+            Injector.get_instance(Over)
+        with pytest.raises(SingletonFrozenError):
+            Injector.override(Base)(Over)
+
+        assert built.value == 1
+        assert type(Injector.get_instance(Base)) is Base
+
+
+# R6
+def test_override_racing_constructor_that_resolves_a_dependency_does_not_deadlock():
+    """An override racing a constructor that asks the injector for a dependency lets both threads finish."""
+    with Injector.context(InjectionSubcontextType.RESET):
+        entered, resolve, release = threading.Event(), threading.Event(), threading.Event()
+        released = []
+
+        @Injector.singleton
+        class Dep:
+            pass
+
+        @Injector.singleton
+        class Base:
+            pass
+
+        @Injector.singleton
+        class Over(Base):
+            def __init__(self):
+                entered.set()
+                resolve.wait(TIMEOUT)
+                self.dep = Injector.get_instance(Dep)
+                released.append(release.wait(TIMEOUT))
+
+        building = _Worker(lambda: Injector.get_instance(Over))
+        assert entered.wait(TIMEOUT)
+        overriding = _Worker(lambda: Injector.override(Base)(Over))
+        resolve.set()
+        overriding.join()
+        release.set()
+        building.join()
+
+        assert building.error is None
+        assert released == [True]
+        assert building.result.dep is Injector.get_instance(Dep)
+        assert overriding.error is None or isinstance(overriding.error, SingletonFrozenError)
