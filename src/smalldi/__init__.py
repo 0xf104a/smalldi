@@ -89,7 +89,9 @@ class Injector:
 
     Every registered singleton is held by one `LazySingleton` in
     `singletons_available`, and every interface by an `InterfaceResolver`
-    entry that refers to those `LazySingleton` objects.
+    entry that refers to those `LazySingleton` objects. An overridden
+    singleton and its override share one `LazySingleton`, registered under
+    both classes, which creates the override's instance.
 
     Locking. The reentrant class mutex `__class_mutex__` guards the registry:
     `singleton`, `interface`, `override`, `implements`, `is_singleton` and
@@ -131,9 +133,10 @@ class Injector:
         """
         Returns the instance to inject for a registered singleton or interface, creating it if needed.
 
-        Follows the interface's override or implementation and the singleton's
-        override, and freezes every singleton and interface on the way, so none
-        of them can be overridden afterwards. The class mutex is held only while
+        Follows the interface's override or implementation, and freezes the
+        singleton and the interface on the way, so neither can be overridden
+        afterwards; an overridden singleton's `LazySingleton` creates the
+        override's instance. The class mutex is held only while
         the singleton or interface binding is looked up.
 
         :param tp: registered singleton class or interface
@@ -223,7 +226,15 @@ class Injector:
         Returns the decorator that makes a registered singleton override `source_cls`.
 
         The decorator validates everything before binding anything: on failure
-        neither singleton changes.
+        neither singleton changes. On success the `LazySingleton` of
+        `source_cls` gets the overriding class as its override class, is marked
+        as an override, and is registered for the overriding class as well, in
+        place of the `LazySingleton` the overriding class had so far. Every
+        registration and interface binding that referred to the replaced
+        `LazySingleton` is rebound to the shared one, so a class overriding
+        several singletons, or an interface as well, still has one instance.
+        If the replaced `LazySingleton` is frozen, the shared one takes over
+        its instance and frozen state.
 
         :param source_cls: registered singleton to override
         :return: decorator taking the overriding class and returning it unchanged
@@ -236,20 +247,34 @@ class Injector:
         """
         @mutex(cls.__class_mutex__)
         def wrapper(new_cls):
-            if source_cls not in cls._get_singletons_available():
+            singletons = cls._get_singletons_available()
+            if source_cls not in singletons:
                 raise TypeError(
                     f"Class {source_cls.__name__} is not a known singleton. "
                     f"You must override an existing singleton."
                 )
-            if new_cls not in cls._get_singletons_available():
+            if new_cls not in singletons:
                 raise TypeError(
                     f"Class {new_cls.__name__} is not a singleton: "
                     f"apply @Injector.override above @Injector.singleton"
                 )
             if not issubclass(new_cls, source_cls):
                 raise TypeError(f"{new_cls.__name__} is not a subclass of {source_cls.__name__}")
-            target = cls._get_singletons_available()[source_cls]
-            target.delegate_to(cls._get_singletons_available()[new_cls])
+            target = singletons[source_cls]
+            previous = singletons[new_cls]
+            if target.override_cls is source_cls:
+                raise TypeError(
+                    f"Singleton {source_cls.__name__} can not be overriden by itself")
+            overridden_by = previous.override_cls
+            if overridden_by is not None and overridden_by is not new_cls:
+                raise TypeError(
+                    f"Singleton {new_cls.__name__} is overridden by {overridden_by.__name__} "
+                    f"and can't be overriden second time")
+            target.override(new_cls, previous)
+            for key, registered in list(singletons.items()):
+                if registered is previous:
+                    singletons[key] = target
+            cls._get_interface_resolver().rebind(previous, target)
             return new_cls
         return wrapper
 
@@ -300,8 +325,9 @@ class Injector:
 
         Apply the decorator above `@Injector.singleton`. `what` may be a
         registered interface, whose implementation (if any) is then never
-        injected through it, or a registered singleton, which then shares the
-        override's instance and is never instantiated through the injector.
+        injected through it, or a registered singleton, which then shares one
+        `LazySingleton` and one instance with the override and is never
+        instantiated through the injector.
         Overrides are not transitive: an override can't be overridden and an
         overridden singleton can't become an override. Each target is
         overridden at most once, and a frozen target can't be overridden.

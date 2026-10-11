@@ -1,5 +1,5 @@
 """
-Lazily instantiated singletons, one per class registered with `Injector`.
+Lazily instantiated singletons, one per registered class or per overridden class and its override.
 """
 import threading
 from typing import Any, Type
@@ -22,17 +22,17 @@ class SingletonFrozenError(Exception):
 
 class LazySingleton:
     """
-    Lazily created single instance of a class, with an optional delegation to another singleton.
+    Lazily created single instance of a registered class, or of the class overriding it.
 
     `get_instance()` creates the instance on the first call and returns it
-    afterwards. A singleton overridden by another registered singleton
-    (`delegate_to()`) never creates an instance of its own: it returns the
-    instance of the overriding `LazySingleton`, so the target and the override
-    share one instance.
+    afterwards, calling the override class if one was set with `override()`,
+    else the registered class. An overridden class and its override share one
+    `LazySingleton`: `Injector` keeps the object under both classes, so both
+    resolve to one instance and the overridden class is never instantiated.
 
-    Overrides are not transitive: a singleton may delegate only once, a
+    Overrides are not transitive: a singleton is overridden at most once, a
     singleton that is an override can't be overridden itself, and a singleton
-    which already delegates can't become an override of another one.
+    which is overridden can't become an override.
 
     A `LazySingleton` is frozen once an instance was requested from it, even
     if creating the instance then failed. A frozen singleton can't be
@@ -42,16 +42,14 @@ class LazySingleton:
     Two reentrant locks guard a `LazySingleton`. The state lock
     `__instance_mutex__` guards the bindings and the frozen flag; every method
     except `get_instance()` holds it for the whole call through `@threadsafe`,
-    and `get_instance()` holds it only to freeze the singleton and read its
-    delegate. It is never held while a constructor runs or while another
-    singleton is asked for its instance. The build lock `_build_lock` is held
-    while the constructor runs, so concurrent first calls create exactly one
-    instance; nothing else takes it.
+    and `get_instance()` holds it only to freeze the singleton. It is never
+    held while a constructor runs or while another singleton is asked for its
+    instance. The build lock `_build_lock` is held while the constructor runs,
+    so concurrent first calls create exactly one instance; nothing else takes it.
 
-    :ivar _cls: the registered class, called to create the instance
-    :ivar _override: class called instead of `_cls`, set by `override()`; `Injector` never sets it
-    :ivar _delegate: `LazySingleton` whose instance is returned instead of creating one
-    :ivar _is_override: whether this singleton overrides another singleton or an interface
+    :ivar _cls: the registered class, called to create the instance unless overridden
+    :ivar _override: class called instead of `_cls`, set by `override()`, or None
+    :ivar _is_override: whether this singleton is an override of another singleton or of an interface
     :ivar _instance: the created instance, or None
     :ivar _frozen: whether an instance was requested already
     :ivar _threads: idents of the threads currently inside the constructor
@@ -63,11 +61,10 @@ class LazySingleton:
     def __init__(self, cls: Type | None = None, override: Type | None = None):
         """
         :param cls: registered class to create the instance of; `Injector` always passes it
-        :param override: class instantiated instead of `cls`; `Injector` never passes it
+        :param override: class instantiated instead of `cls`; `Injector` sets it through `override()`
         """
         self._cls = cls
         self._override: Type | None = override
-        self._delegate: "LazySingleton | None" = None
         self._is_override = False
         self._instance: Any = None
         self._frozen = False
@@ -94,16 +91,13 @@ class LazySingleton:
 
         The singleton is frozen first, under the state lock, so it stays frozen
         if the constructor raises, and an override attempted while the
-        constructor runs fails with `SingletonFrozenError`. If the singleton
-        delegates to an override, the override's `get_instance()` is returned,
-        which freezes the override too; no lock of this singleton is held for
-        that call. Otherwise the instance is created under the build lock by
-        calling `_override` if set, else `_cls`, while the calling thread's
-        ident is recorded in `_threads`: a nested call from the same thread,
-        which happens when the constructor depends on this singleton directly
-        or through other singletons, is a circular dependency. Another thread
-        asking for the instance waits on the build lock until the constructor
-        finishes.
+        constructor runs fails with `SingletonFrozenError`. The instance is
+        created under the build lock by calling `_override` if set, else
+        `_cls`, while the calling thread's ident is recorded in `_threads`: a
+        nested call from the same thread, which happens when the constructor
+        depends on this singleton directly or through other singletons, is a
+        circular dependency. Another thread asking for the instance waits on
+        the build lock until the constructor finishes.
 
         :return: the instance
         :raises RuntimeError: if the current thread has no ident
@@ -113,9 +107,6 @@ class LazySingleton:
         """
         with self.__instance_mutex__:
             self._frozen = True
-            delegate = self._delegate
-        if delegate is not None:
-            return delegate.get_instance()
         with self._build_lock:
             ident = threading.current_thread().ident
             if ident is None:
@@ -135,71 +126,65 @@ class LazySingleton:
                 self._threads.remove(ident)
 
     @threadsafe
-    def override(self, new: Type):
+    def override(self, new: Type, previous: "LazySingleton | None" = None):
         """
-        Makes `get_instance()` call `new` instead of the registered class. Not used by `Injector`.
+        Makes `get_instance()` call `new` instead of the registered class, and marks
+        this singleton as an override.
 
-        `new` is not validated against the registered class.
+        All checks run before anything changes. `new` is not validated against
+        the registered class: `Injector` checks that it is a registered subclass.
+        If `previous`, the `LazySingleton` registered for `new` so far, is
+        frozen, this singleton becomes frozen and takes over its instance, so an
+        instance of `new` created before the override is shared instead of being
+        created again. `previous` is read under its own state lock; `Injector`
+        then discards it and registers this singleton for `new`.
 
         :param new: class to instantiate instead of `_cls`
+        :param previous: `LazySingleton` so far registered for `new`, or None
         :raises SingletonFrozenError: if this singleton is frozen
-        :raises RuntimeError: if this singleton already has an override class or delegates
+        :raises RuntimeError: if this singleton already has an override class
+        :raises TypeError: if this singleton is an override itself, or `new` is its registered class
         """
         if self._frozen:
             raise SingletonFrozenError(f"Singleton {self._name} was already frozen")
-        if self._override is not None or self._delegate is not None:
-            raise RuntimeError(f"Singleton {self._name} was already overridden")
-        self._override = new
-
-    @threadsafe
-    def delegate_to(self, target: "LazySingleton") -> None:
-        """
-        Overrides this singleton with another registered singleton: afterwards
-        `get_instance()` returns the target's instance.
-
-        All checks run before anything changes. The target is marked as an
-        override, which fails if the target delegates or has an override class
-        itself; the target may be frozen already, its instance is then shared.
-        This singleton's lock is held for the call, and the target's lock is taken
-        while it is marked.
-
-        :param target: `LazySingleton` of the overriding class
-        :raises TypeError: if `target` is this singleton
-        :raises SingletonFrozenError: if this singleton is frozen
-        :raises RuntimeError: if this singleton already delegates or has an override class
-        :raises TypeError: if this singleton is an override itself, or `target` already delegates
-            or has an override class (the override would form a chain)
-        """
-        if target is self:
-            raise TypeError(f"Singleton {self._name} can't override itself")
-        if self._frozen:
-            raise SingletonFrozenError(f"Singleton {self._name} was already frozen")
-        if self._override is not None or self._delegate is not None:
+        if self._override is not None:
             raise RuntimeError(f"Singleton {self._name} was already overridden")
         if self._is_override:
             raise TypeError(f"Singleton {self._name} is an override itself and can't be overridden")
-        target._mark_as_override()
-        self._delegate = target
+        if new is self._cls:
+            raise TypeError(f"Singleton {self._name} can't override itself")
+        frozen, instance = False, None
+        if previous is not None:
+            with previous.__instance_mutex__:
+                frozen, instance = previous._frozen, previous._instance
+        self._override = new
+        self._is_override = True
+        if frozen:
+            self._frozen = True
+            self._instance = instance
 
     @threadsafe
-    def _mark_as_override(self) -> None:
+    def _mark_as_override(self, cls: Type) -> None:
         """
-        Marks this singleton as an override of another singleton or of an interface.
+        Marks this singleton as the override of an interface, on behalf of `cls`.
 
-        A frozen singleton may be marked: its existing instance is then shared
-        with the target.
+        `cls` is the registered class of this singleton or, if the singleton is
+        shared between an overridden class and its override, the override. A
+        frozen singleton may be marked: its existing instance is then shared
+        with the interface.
 
-        :raises TypeError: if this singleton delegates or has an override class
+        :param cls: the class overriding the interface
+        :raises TypeError: if `cls` is overridden by another class
         """
-        if self._override is not None or self._delegate is not None:
-            raise TypeError(f"Singleton {self._name} is overridden and can't be an override")
+        if self._override is not None and self._override is not cls:
+            raise TypeError(f"Singleton {cls.__name__} is overridden and can't be an override")
         self._is_override = True
 
     @property
     @threadsafe
     def override_cls(self) -> Type | None:
         """
-        The class set with `override()`, or None. Not used by `Injector`.
+        The class set with `override()`, or None.
         """
         return self._override
 
@@ -207,7 +192,7 @@ class LazySingleton:
     @threadsafe
     def implementation_cls(self) -> Type | None:
         """
-        The class set with `override()`, or None; the same value as `override_cls`. Not used by `Injector`.
+        The registered class, or None for a singleton created without one.
         """
         return self._cls
 
@@ -236,21 +221,10 @@ class LazySingleton:
         return self._frozen
 
     @threadsafe
-    def stacked(self):
-        current_impl = None
-        if self._override is not None:
-            current_impl = self._override
-        else:
-            current_impl = self._cls
-        clone = self.__class__(current_impl)
-        clone._frozen = self._frozen
-        return clone
-
-    @threadsafe
     def clone(self):
         clone = self.__class__(
             self._cls,
             self._override
         )
-        clone._is_override = clone._is_override
+        clone._is_override = self._is_override
         return clone

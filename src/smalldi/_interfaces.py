@@ -45,16 +45,18 @@ class _LazyInterfaceImpl:
         self.__instance_mutex__ = threading.RLock()
 
     @threadsafe
-    def override(self, target: LazySingleton):
+    def override(self, new_impl: Type, target: LazySingleton):
         """
         Binds the override of the interface. All checks run before anything changes.
 
-        The target's lock is taken while it is marked as an override.
+        The target's lock is taken while it is marked as an override on behalf
+        of `new_impl`.
 
-        :param target: `LazySingleton` of the overriding class
+        :param new_impl: the overriding class
+        :param target: `LazySingleton` registered for `new_impl`
         :raises SingletonFrozenError: if the binding is frozen
         :raises TypeError: if the interface is already overridden, `target` is its implementation,
-            or `target` already delegates to another singleton or has an override class
+            or `new_impl` is overridden by another singleton
         """
         if self._frozen:
             raise SingletonFrozenError(f"Interface {self.interface.__name__!r} was already frozen")
@@ -62,7 +64,7 @@ class _LazyInterfaceImpl:
             raise TypeError(f"Interface {self.interface.__name__!r} is already overridden")
         if target is self.implementation_singleton:
             raise TypeError(f"Interface {self.interface.__name__!r} can't be overridden by its own implementation")
-        target._mark_as_override()
+        target._mark_as_override(new_impl)
         self.override_singleton = target
 
     @threadsafe
@@ -70,9 +72,9 @@ class _LazyInterfaceImpl:
         """
         Binds the implementation of the interface. All checks run before anything changes.
 
-        `target` isn't marked in any way: a singleton that delegates to an
-        override may implement an interface, and the interface then resolves
-        to the override's instance.
+        `target` isn't marked in any way: an overridden singleton may implement
+        an interface, and the interface then resolves to the override's
+        instance, which the shared `LazySingleton` creates.
 
         :param target: `LazySingleton` of the implementing class
         :raises RuntimeError: if the interface already has an implementation
@@ -86,6 +88,23 @@ class _LazyInterfaceImpl:
         if self._frozen and self.override_singleton is None:
             raise SingletonFrozenError(f"Interface {self.interface.__name__!r} was already frozen")
         self.implementation_singleton = target
+
+    @threadsafe
+    def rebind(self, old: LazySingleton, new: LazySingleton) -> None:
+        """
+        Replaces `old` by `new` wherever this binding refers to it.
+
+        Called when `Injector` replaces the `LazySingleton` of a class by the
+        one it shares with the singleton it overrides, so the binding keeps
+        referring to the object `Injector` owns.
+
+        :param old: `LazySingleton` being discarded
+        :param new: `LazySingleton` registered in its place
+        """
+        if self.implementation_singleton is old:
+            self.implementation_singleton = new
+        if self.override_singleton is old:
+            self.override_singleton = new
 
     def get_impl(self) -> Any:
         """
@@ -179,15 +198,15 @@ class InterfaceResolver:
         :param new_impl: the overriding class, checked to be a subclass of `interface`
         :param target: `LazySingleton` of `new_impl`
         :raises TypeError: if `interface` isn't registered, `new_impl` isn't a subclass of it,
-            the interface is already overridden, `target` is its implementation, or `target`
-            already delegates to another singleton
+            the interface is already overridden, `target` is its implementation, or `new_impl`
+            is overridden by another singleton
         :raises SingletonFrozenError: if the interface's binding is frozen
         """
         if not interface in self._interfaces:
             raise TypeError(f"Interface {interface.__name__!r} is not registered")
         if not issubclass(new_impl, interface):
             raise TypeError(f"Class {new_impl} is not a subclass of {interface}")
-        self._interfaces[interface].override(target)
+        self._interfaces[interface].override(new_impl, target)
 
     @threadsafe
     def implement(self, interface: Type, impl: Type, target: LazySingleton):
@@ -207,6 +226,17 @@ class InterfaceResolver:
         if not issubclass(impl, interface):
             raise TypeError(f"Class {impl} is not a subclass of {interface}")
         self._interfaces[interface].implement(target)
+
+    @threadsafe
+    def rebind(self, old: LazySingleton, new: LazySingleton) -> None:
+        """
+        Replaces `old` by `new` in every binding that refers to it.
+
+        :param old: `LazySingleton` being discarded by `Injector`
+        :param new: `LazySingleton` registered in its place
+        """
+        for binding in self._interfaces.values():
+            binding.rebind(old, new)
 
     @threadsafe
     def rewired(self, new_singletons: dict[type, LazySingleton]) -> 'InterfaceResolver':
