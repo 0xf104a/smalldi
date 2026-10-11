@@ -72,7 +72,7 @@ class LazySingleton:
         self._is_override = False
         self._instance: Any = None
         self._frozen = False
-        self._threads = AtomicSet()
+        self._threads: AtomicSet[int] = AtomicSet()
         self.__instance_mutex__ = threading.RLock()
         self._build_lock = threading.RLock()
 

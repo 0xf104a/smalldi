@@ -183,7 +183,7 @@ class InjectionContextManager(AbstractContextManager):
 
     :ivar injector: the `Injector` class whose registry is pushed to
     """
-    def __init__(self, injector: 'Injector', context_factory: Callable[[], InjectionContext]):
+    def __init__(self, injector: 'type[Injector]', context_factory: Callable[[], InjectionContext]):
         """
         :param injector: the `Injector` class
         :param context_factory: called once, at `__enter__`, to build the context to push
