@@ -48,6 +48,7 @@ Also included: `Container`, a singleton base class that collects classes and fun
 - [smalldi/_context/tree.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/_context/tree.py): `ContextTree`, the per-slice context stacks
 - [smalldi/thread.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/thread.py): `ContextAwareThread`
 - [smalldi/annotation.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/annotation.py): the `Provide[T]` annotation
+- [smalldi/asynchronous.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/asynchronous.py): the coroutine-function wrapper behind `@Injector.inject` on `async def`
 - [smalldi/container.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/container.py): `Container` and `ComponentRegistration`
 - [smalldi/collector.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/collector.py): `Collector.collect_from_package`
 - [smalldi/concurrency.py](https://github.com/0xf104a/smalldi/blob/master/src/smalldi/concurrency.py): `@synchronized`, `@threadsafe` and the `mutex` helper

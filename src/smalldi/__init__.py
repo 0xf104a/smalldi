@@ -20,7 +20,6 @@ module, `smalldi.context.InjectionSubcontextType` and
 """
 import copy
 import functools
-import inspect
 import threading
 import types
 import warnings
@@ -31,6 +30,7 @@ from smalldi._context import InjectionContextRegistry
 from smalldi._interfaces import InterfaceResolver
 from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.annotation import _Provide, Provide
+from smalldi.asynchronous import is_coroutine_function, wrap_coroutine_function
 from smalldi.concurrency import threadsafe, mutex
 from smalldi.context import InjectionContext, InjectionSubcontextType, InjectionContextManager
 from smalldi.decorator import staticclass
@@ -204,7 +204,8 @@ class Injector:
         `TypeError` for a duplicate argument.
 
         For an `async def` function the wrapper is itself a coroutine function,
-        and dependencies are resolved when the coroutine starts running, not
+        built by `smalldi.asynchronous.wrap_coroutine_function`, and
+        dependencies are resolved when the coroutine starts running, not
         when the function is called.
 
         :param fn: function to inject dependencies into
@@ -222,21 +223,15 @@ class Injector:
                     raise TypeError(f"Singleton {tp} is not available")
             name2type[name] = tp
 
-        if inspect.iscoroutinefunction(fn):
-            @functools.wraps(fn)
-            async def wrapped_fn(*args, **kwargs):
-                for argname, _tp in name2type.items():
-                    if argname not in kwargs:
-                        kwargs[argname] = cls.get_instance(_tp)
-                return await fn(*args, **kwargs)
-            return wrapped_fn
-        else:
-            @functools.wraps(fn)
-            def wrapped_fn(*args, **kwargs):
-                for argname, _tp in name2type.items():
-                    if argname not in kwargs:
-                        kwargs[argname] = cls.get_instance(_tp)
-                return fn(*args, **kwargs)
+        if is_coroutine_function(fn):
+            return wrap_coroutine_function(fn, name2type, cls.get_instance)
+
+        @functools.wraps(fn)
+        def wrapped_fn(*args, **kwargs):
+            for argname, _tp in name2type.items():
+                if argname not in kwargs:
+                    kwargs[argname] = cls.get_instance(_tp)
+            return fn(*args, **kwargs)
         return wrapped_fn
 
     @threadsafe

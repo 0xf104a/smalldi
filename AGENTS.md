@@ -9,6 +9,7 @@ The package lives in `src/smalldi/`, the tests in `src/tests/`.
 - `src/smalldi/_singleton.py`: `LazySingleton`, the lazily built single instance of a registered class, with delegation to an override, freezing and the circular-dependency check; `SingletonFrozenError`.
 - `src/smalldi/_interfaces.py`: `InterfaceResolver`, the registry of interfaces, and `_LazyInterfaceImpl`, one interface's binding to the `LazySingleton` objects implementing and overriding it.
 - `src/smalldi/annotation.py`: `Provide[T]` (an `Annotated` alias) and the helpers that read it from a function signature.
+- `src/smalldi/asynchronous.py`: `wrap_coroutine_function`, the coroutine-function wrapper `Injector.inject` returns for an `async def` function, and `is_coroutine_function`.
 - `src/smalldi/container.py`: `Container`, a singleton base class collecting components registered with `@MyContainer.component`, and `ComponentRegistration`.
 - `src/smalldi/collector.py`: `Collector.collect_from_package`, which imports every module of a package so its decorators run.
 - `src/smalldi/concurrency.py`: `@synchronized`, `@threadsafe` and the `mutex` decorator factory, the reentrant-lock helpers used throughout the package.
