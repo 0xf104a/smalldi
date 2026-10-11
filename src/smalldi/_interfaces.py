@@ -1,6 +1,7 @@
 """
 Interfaces and their bindings to the singletons implementing or overriding them, used by `Injector`.
 """
+import copy
 import threading
 from inspect import isabstract
 from typing import Any, Type
@@ -25,8 +26,8 @@ class _LazyInterfaceImpl:
     asks the target for its instance after releasing it.
 
     :ivar interface: the abstract class
-    :ivar _implementation: `LazySingleton` declared with `@Injector.implements`, or None
-    :ivar _override: `LazySingleton` declared with `@Injector.override`, or None
+    :ivar implementation_singleton: `LazySingleton` declared with `@Injector.implements`, or None
+    :ivar override_singleton: `LazySingleton` declared with `@Injector.override`, or None
     :ivar _frozen: whether an instance was requested through this binding
     :ivar __instance_mutex__: the lock guarding the binding
     """
@@ -38,8 +39,8 @@ class _LazyInterfaceImpl:
         if not isabstract(interface):
             raise TypeError(f"Interface {interface.__name__!r} is not abstract")
         self.interface = interface
-        self._implementation: LazySingleton | None = None
-        self._override: LazySingleton | None = None
+        self.implementation_singleton: LazySingleton | None = None
+        self.override_singleton: LazySingleton | None = None
         self._frozen = False
         self.__instance_mutex__ = threading.RLock()
 
@@ -57,12 +58,12 @@ class _LazyInterfaceImpl:
         """
         if self._frozen:
             raise SingletonFrozenError(f"Interface {self.interface.__name__!r} was already frozen")
-        if self._override is not None:
+        if self.override_singleton is not None:
             raise TypeError(f"Interface {self.interface.__name__!r} is already overridden")
-        if target is self._implementation:
+        if target is self.implementation_singleton:
             raise TypeError(f"Interface {self.interface.__name__!r} can't be overridden by its own implementation")
         target._mark_as_override()
-        self._override = target
+        self.override_singleton = target
 
     @threadsafe
     def implement(self, target: LazySingleton):
@@ -78,13 +79,13 @@ class _LazyInterfaceImpl:
         :raises TypeError: if `target` is the interface's override
         :raises SingletonFrozenError: if the binding is frozen and has no override
         """
-        if self._implementation is not None:
+        if self.implementation_singleton is not None:
             raise RuntimeError(f"Interface {self.interface.__name__!r} is already implemented")
-        if target is self._override:
+        if target is self.override_singleton:
             raise TypeError(f"Interface {self.interface.__name__!r} can't be implemented by its own override")
-        if self._frozen and self._override is None:
+        if self._frozen and self.override_singleton is None:
             raise SingletonFrozenError(f"Interface {self.interface.__name__!r} was already frozen")
-        self._implementation = target
+        self.implementation_singleton = target
 
     def get_impl(self) -> Any:
         """
@@ -101,10 +102,20 @@ class _LazyInterfaceImpl:
         """
         with self.__instance_mutex__:
             self._frozen = True
-            target = self._override if self._override is not None else self._implementation
+            target = self.override_singleton if self.override_singleton is not None else self.implementation_singleton
         if target is None:
             raise RuntimeError(f"Interface {self.interface.__name__!r} is not implemented")
         return target.get_instance()
+
+    def stacked(self) -> 'InterfaceResolver':
+        new_instance = self.__class__(self.interface)
+        my_impl = None
+        if self.override_singleton is not None:
+            my_impl = self.override_singleton
+        else:
+            my_impl = self.implementation_singleton
+        new_instance.implementation_singleton = my_impl
+        return new_instance
 
 class InterfaceResolver:
     """
@@ -115,11 +126,13 @@ class InterfaceResolver:
     instance. `Injector` calls the resolver while holding its own class mutex
     as well.
     """
-    def __init__(self):
+    def __init__(self, interfaces: dict[type, _LazyInterfaceImpl] | None = None):
         """
         Creates an empty registry.
         """
-        self._interfaces: dict[type, _LazyInterfaceImpl] = dict()
+        if interfaces is None:
+            interfaces = dict()
+        self._interfaces: dict[type, _LazyInterfaceImpl] = interfaces
         self.__instance_mutex__ = threading.RLock()
 
     def get_binding(self, interface: type) -> "_LazyInterfaceImpl":
@@ -194,3 +207,28 @@ class InterfaceResolver:
         if not issubclass(impl, interface):
             raise TypeError(f"Class {impl} is not a subclass of {interface}")
         self._interfaces[interface].implement(target)
+
+    @threadsafe
+    def rewired(self, new_singletons: dict[type, LazySingleton]) -> 'InterfaceResolver':
+        new_interfaces: dict[type, _LazyInterfaceImpl] = dict()
+        for interface, target in self._interfaces.items():
+            new_target = _LazyInterfaceImpl(interface)
+            if target.implementation_singleton is not None:
+                if target.implementation_singleton.implementation_cls is not None:
+                    new_target.implementation_singleton = (new_singletons
+                                                           .get(target.implementation_singleton.implementation_cls,
+                                                                None))
+            if target.override_singleton is not None:
+                if target.override_singleton.implementation_cls is not None:
+                    new_target.override_singleton = (new_singletons
+                                                      .get(target.override_singleton.implementation_cls,
+                                                           None))
+            new_interfaces[interface] = new_target
+        return InterfaceResolver(new_interfaces)
+
+    @threadsafe
+    def stacked(self) -> 'InterfaceResolver':
+        new_interfaces = dict()
+        for interface, target in self._interfaces.items():
+            new_interfaces[interface] = target.stacked()
+        return InterfaceResolver(new_interfaces)

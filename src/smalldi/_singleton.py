@@ -60,7 +60,7 @@ class LazySingleton:
     """
 
     # _cls may None for interfaces, e.g. only override was imported
-    def __init__(self, cls: Type | None, override: Type | None = None):
+    def __init__(self, cls: Type | None = None, override: Type | None = None):
         """
         :param cls: registered class to create the instance of; `Injector` always passes it
         :param override: class instantiated instead of `cls`; `Injector` never passes it
@@ -209,7 +209,7 @@ class LazySingleton:
         """
         The class set with `override()`, or None; the same value as `override_cls`. Not used by `Injector`.
         """
-        return self._override
+        return self._cls
 
     @threadsafe
     def set_base(self, implementation_cls):
@@ -234,3 +234,19 @@ class LazySingleton:
         longer be overridden. Not used by `Injector`.
         """
         return self._frozen
+
+    @threadsafe
+    def clean_copy(self):
+        return self.__class__(
+            self._cls,
+            self._override
+        )
+
+    @threadsafe
+    def stacked(self):
+        current_impl = None
+        if self._override is not None:
+            current_impl = self._override
+        else:
+            current_impl = self._cls
+        return self.__class__(current_impl)

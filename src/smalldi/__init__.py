@@ -8,6 +8,7 @@ parameters of `@Injector.inject`-decorated functions that are annotated with
 
 Public names: `Injector`, `Provide` and `SingletonFrozenError`.
 """
+import copy
 import functools
 import threading
 import types
@@ -19,6 +20,7 @@ from smalldi._interfaces import InterfaceResolver
 from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.annotation import _Provide, Provide
 from smalldi.concurrency import threadsafe, mutex
+from smalldi.context import InjectionContext, InjectionSubcontextType, InjectionContextManager
 from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
@@ -61,7 +63,7 @@ class _SingletonsAvailable:
             stacklevel=2,
         )
         with owner.__class_mutex__:
-            classes = list(owner._singletons_available)
+            classes = list(owner._get_singletons_available())
         return types.MappingProxyType({cls: owner.get_instance(cls) for cls in classes})
 
 
@@ -86,7 +88,7 @@ class Injector:
     can't become an override.
 
     Every registered singleton is held by one `LazySingleton` in
-    `_singletons_available`, and every interface by an `InterfaceResolver`
+    `singletons_available`, and every interface by an `InterfaceResolver`
     entry that refers to those `LazySingleton` objects.
 
     Locking. The reentrant class mutex `__class_mutex__` guards the registry:
@@ -111,11 +113,18 @@ class Injector:
     # Guarded by __class_mutex__: every method that reads or writes these holds
     # it, through @threadsafe, `with cls.__class_mutex__` or @mutex. The mutex
     # is reentrant and is never held while an instance is requested.
-    _singletons_available: dict[type, LazySingleton] = dict()
-    _interface_resolver = InterfaceResolver()
+    _context_stack = [InjectionContext.empty()]
     __class_mutex__ = threading.RLock()
 
     singletons_available = _SingletonsAvailable()
+
+    @classmethod
+    def _get_singletons_available(cls):
+        return cls._context_stack[-1].singletons_available
+
+    @classmethod
+    def _get_interface_resolver(cls):
+        return cls._context_stack[-1].interface_resolver
 
     @classmethod
     def get_instance(cls, tp: type) -> Any:
@@ -136,10 +145,10 @@ class Injector:
         :raises Exception: any exception raised by the constructor propagates unchanged
         """
         with cls.__class_mutex__:
-            if cls._interface_resolver.is_interface(tp):
-                binding = cls._interface_resolver.get_binding(tp)
+            if cls._get_interface_resolver().is_interface(tp):
+                binding = cls._get_interface_resolver().get_binding(tp)
             else:
-                binding = cls._singletons_available[tp]
+                binding = cls._get_singletons_available()[tp]
         if isinstance(binding, LazySingleton):
             return binding.get_instance()
         return binding.get_impl()
@@ -173,7 +182,7 @@ class Injector:
         name2type = dict()
         for name, tp in _Provide.iter_annotations(fn):
             with cls.__class_mutex__:
-                if tp not in cls._singletons_available and not cls._interface_resolver.is_interface(tp):
+                if tp not in cls._get_singletons_available() and not cls._get_interface_resolver().is_interface(tp):
                     raise TypeError(f"Singleton {tp} is not available")
             name2type[name] = tp
 
@@ -202,9 +211,9 @@ class Injector:
         """
         if isabstract(target_cls):
             raise TypeError(f"Class {target_cls} is abstract and cannot be a singleton. Maybe you meant to use @Injector.interface instead?")
-        if target_cls in cls._singletons_available:
+        if target_cls in cls._get_singletons_available():
             raise TypeError(f"Class {target_cls} is already a singleton")
-        cls._singletons_available[target_cls] = LazySingleton(target_cls)
+        cls._get_singletons_available()[target_cls] = LazySingleton(target_cls)
         return target_cls
 
     @threadsafe
@@ -227,20 +236,20 @@ class Injector:
         """
         @mutex(cls.__class_mutex__)
         def wrapper(new_cls):
-            if source_cls not in cls._singletons_available:
+            if source_cls not in cls._get_singletons_available():
                 raise TypeError(
                     f"Class {source_cls.__name__} is not a known singleton. "
                     f"You must override an existing singleton."
                 )
-            if new_cls not in cls._singletons_available:
+            if new_cls not in cls._get_singletons_available():
                 raise TypeError(
                     f"Class {new_cls.__name__} is not a singleton: "
                     f"apply @Injector.override above @Injector.singleton"
                 )
             if not issubclass(new_cls, source_cls):
                 raise TypeError(f"{new_cls.__name__} is not a subclass of {source_cls.__name__}")
-            target = cls._singletons_available[source_cls]
-            target.delegate_to(cls._singletons_available[new_cls])
+            target = cls._get_singletons_available()[source_cls]
+            target.delegate_to(cls._get_singletons_available()[new_cls])
             return new_cls
         return wrapper
 
@@ -259,12 +268,12 @@ class Injector:
         """
         @mutex(cls.__class_mutex__)
         def wrapper(new_impl):
-            if new_impl not in cls._singletons_available:
+            if new_impl not in cls._get_singletons_available():
                 raise TypeError(
                     f"Class {new_impl.__name__} is not a singleton: "
                     f"apply @Injector.override above @Injector.singleton"
                 )
-            cls._interface_resolver.override(interface, new_impl, cls._singletons_available[new_impl])
+            cls._get_interface_resolver().override(interface, new_impl, cls._get_singletons_available()[new_impl])
             return new_impl
         return wrapper
 
@@ -280,7 +289,7 @@ class Injector:
         """
         if not isabstract(target_cls):
             raise TypeError(f"Class {target_cls} is not abstract and cannot be an interface. Maybe you meant to use @Injector.singleton instead?")
-        cls._interface_resolver.register(target_cls)
+        cls._get_interface_resolver().register(target_cls)
         return target_cls
 
     @threadsafe
@@ -309,7 +318,7 @@ class Injector:
         """
         if not when():
             return lambda candidate: candidate
-        if cls._interface_resolver.is_interface(what):
+        if cls._get_interface_resolver().is_interface(what):
             return cls._override_interface(what)
         else:
             return cls._override_singleton(what)
@@ -336,12 +345,12 @@ class Injector:
         """
         @mutex(cls.__class_mutex__)
         def wrapper(impl):
-            if impl not in cls._singletons_available:
+            if impl not in cls._get_singletons_available():
                 raise TypeError(
                     f"Class {impl.__name__} is not a singleton: "
                     f"apply @Injector.implements above @Injector.singleton"
                 )
-            cls._interface_resolver.implement(what, impl, cls._singletons_available[impl])
+            cls._get_interface_resolver().implement(what, impl, cls._get_singletons_available()[impl])
             return impl
         return wrapper
 
@@ -354,7 +363,7 @@ class Injector:
         :param tp: class to check
         :return: True if `tp` was registered with `@Injector.interface`
         """
-        return cls._interface_resolver.is_interface(tp)
+        return cls._get_interface_resolver().is_interface(tp)
 
     @threadsafe
     @classmethod
@@ -365,4 +374,36 @@ class Injector:
         :param target: class to check
         :return: True if `target` was registered with `@Injector.singleton`
         """
-        return target in cls._singletons_available
+        return target in cls._get_singletons_available()
+
+    @threadsafe
+    @classmethod
+    def context(cls, kind: InjectionSubcontextType = InjectionSubcontextType.RESET) -> InjectionContextManager:
+        new_context = None
+        current_context = cls._context_stack[-1]
+        match kind:
+            case InjectionSubcontextType.RESET:
+                new_context = InjectionContext.resetted(current_context.singletons_available,
+                                                        current_context.interface_resolver)
+            case InjectionSubcontextType.PRESERVE:
+                new_context = current_context
+            case InjectionSubcontextType.EMPTY:
+                new_context = InjectionContext.empty()
+            case InjectionSubcontextType.SHALLOW:
+                new_context = InjectionContext(
+                    copy.copy(current_context.singletons_available),
+                    cls._get_interface_resolver().shallow_copy()
+                )
+            case InjectionSubcontextType.STACK:
+                new_context = InjectionContext.from_lazy_types_stacked(current_context.singletons_available)
+            case _:
+                raise ValueError(f"Unknown context kind: {kind}")
+        cls._context_stack.append(new_context)
+        return InjectionContextManager(cls)
+
+    @threadsafe
+    @classmethod
+    def finalize_context(cls):
+        if len(cls._context_stack) == 1:
+            raise RuntimeError("Finalization of the root context is not allowed")
+        cls._context_stack.pop()

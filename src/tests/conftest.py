@@ -35,14 +35,7 @@ def _ensure_injector_unlocked():
 def reset_injector():
     """Reset Injector state before and after each test"""
     _ensure_injector_unlocked()
-    old_singletons: Dict[Any, Any] = Injector._singletons_available.copy()
-    old_resolver = Injector._interface_resolver
-
-    Injector._singletons_available.clear()
-    Injector._interface_resolver = InterfaceResolver()
-
+    current_context = Injector.context()
     yield
+    current_context.__exit__(None, None, None)
 
-    Injector._singletons_available.clear()
-    Injector._singletons_available.update(old_singletons)
-    Injector._interface_resolver = old_resolver
