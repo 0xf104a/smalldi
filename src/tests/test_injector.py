@@ -1,8 +1,11 @@
+import asyncio
+import inspect
 from abc import ABC, abstractmethod
 
 import pytest
 
 from smalldi import Injector, Provide, SingletonFrozenError
+from smalldi.context import InjectionSubcontextType
 
 
 def test_singleton_registration(reset_injector):
@@ -379,3 +382,120 @@ def test_override_interface_and_singleton_at_once(reset_injector):
     fake = Injector.get_instance(FakeMailService)
     assert Injector.get_instance(Mailer) is fake
     assert Injector.get_instance(MailService) is fake
+
+
+def test_inject_async_function_is_coroutine_function():
+    """An injected async function is a coroutine function itself"""
+    with Injector.context(InjectionSubcontextType.RESET):
+        @Injector.singleton
+        class Dep:
+            pass
+
+        @Injector.inject
+        async def fn(dep: Provide[Dep]):
+            return dep
+
+        assert inspect.iscoroutinefunction(fn)
+        assert asyncio.iscoroutinefunction(fn)
+
+
+def test_inject_async_function_resolves_when_coroutine_runs():
+    """Dependencies are resolved when the coroutine runs, not when the function is called"""
+    async def main():
+        with Injector.context(InjectionSubcontextType.RESET):
+            counter = 0
+
+            @Injector.singleton
+            class Dep:
+                def __init__(self):
+                    nonlocal counter
+                    counter += 1
+
+            @Injector.inject
+            async def fn(dep: Provide[Dep]):
+                return dep
+
+            coroutine = fn()
+            assert counter == 0
+            dep = await coroutine
+            assert counter == 1
+            assert dep is Injector.get_instance(Dep)
+
+    asyncio.run(main())
+
+
+def test_inject_async_function_uses_explicit_keyword_argument():
+    """A dependency passed by keyword is used instead of the injected one"""
+    with Injector.context(InjectionSubcontextType.RESET):
+        counter = 0
+
+        @Injector.singleton
+        class Dep:
+            def __init__(self):
+                nonlocal counter
+                counter += 1
+
+        @Injector.inject
+        async def fn(dep: Provide[Dep]):
+            return dep
+
+        explicit = object()
+        assert asyncio.run(fn(dep=explicit)) is explicit
+        assert counter == 0
+
+
+def test_inject_async_function_passes_result_and_exception_through():
+    """The coroutine's return value and exceptions reach the caller unchanged"""
+    async def main():
+        with Injector.context(InjectionSubcontextType.RESET):
+            @Injector.singleton
+            class Dep:
+                pass
+
+            result = object()
+            error = ValueError("boom")
+
+            @Injector.inject
+            async def returns(dep: Provide[Dep]):
+                return result
+
+            @Injector.inject
+            async def raises(dep: Provide[Dep]):
+                raise error
+
+            assert await returns() is result
+            with pytest.raises(ValueError) as exc_info:
+                await raises()
+            assert exc_info.value is error
+
+    asyncio.run(main())
+
+
+def test_inject_async_function_rejects_unregistered_class():
+    """Decorating an async function with an unregistered dependency raises TypeError"""
+    with Injector.context(InjectionSubcontextType.RESET):
+        class NotRegistered:
+            pass
+
+        with pytest.raises(TypeError):
+            @Injector.inject
+            async def fn(dep: Provide[NotRegistered]):
+                return dep
+
+
+def test_inject_async_function_preserves_metadata():
+    """The wrapper of an async function keeps the original's name, qualname, docstring and __wrapped__"""
+    with Injector.context(InjectionSubcontextType.RESET):
+        @Injector.singleton
+        class Dep:
+            pass
+
+        async def fn(dep: Provide[Dep]):
+            """Original docstring"""
+            return dep
+
+        wrapped = Injector.inject(fn)
+        assert wrapped.__name__ == fn.__name__
+        assert wrapped.__qualname__ == fn.__qualname__
+        assert wrapped.__doc__ == fn.__doc__
+        assert wrapped.__wrapped__ is fn

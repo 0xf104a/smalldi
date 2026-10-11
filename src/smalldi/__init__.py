@@ -10,6 +10,7 @@ Public names: `Injector`, `Provide` and `SingletonFrozenError`.
 """
 import copy
 import functools
+import inspect
 import threading
 import types
 import warnings
@@ -178,6 +179,10 @@ class Injector:
         detected: the parameter is filled by keyword as well, so the call raises
         `TypeError` for a duplicate argument.
 
+        For an `async def` function the wrapper is itself a coroutine function,
+        and dependencies are resolved when the coroutine starts running, not
+        when the function is called.
+
         :param fn: function to inject dependencies into
         :return: wrapper of `fn` with the same signature
         :raises TypeError: at decoration, if a `Provide[T]` parameter names neither a registered
@@ -192,6 +197,15 @@ class Injector:
                 if tp not in cls._get_singletons_available() and not cls._get_interface_resolver().is_interface(tp):
                     raise TypeError(f"Singleton {tp} is not available")
             name2type[name] = tp
+
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def wrapped_fn(*args, **kwargs):
+                for argname, _tp in name2type.items():
+                    if argname not in kwargs:
+                        kwargs[argname] = cls.get_instance(_tp)
+                return await fn(*args, **kwargs)
+            return wrapped_fn
 
         @functools.wraps(fn)
         def wrapped_fn(*args, **kwargs):

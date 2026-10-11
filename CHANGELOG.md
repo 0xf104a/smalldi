@@ -1,6 +1,7 @@
 # Changelog
 ## Unreleased
 ### Fixed
+* `@Injector.inject` on an `async def` function returns a coroutine function that resolves `Provide[T]` when the coroutine starts running
 * An instance request and the freezing of what it looks up are one step under the injector's lock: an override that
   races a request for its target or for the overriding class is refused with `SingletonFrozenError` instead of
   succeeding after the request was made, and no constructor runs inside a `LazySingleton` the override discarded
