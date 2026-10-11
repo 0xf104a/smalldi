@@ -383,22 +383,23 @@ class Injector:
         current_context = cls._context_stack[-1]
         match kind:
             case InjectionSubcontextType.RESET:
-                new_context = InjectionContext.resetted(current_context.singletons_available,
-                                                        current_context.interface_resolver)
+                new_context = current_context.resetted()
             case InjectionSubcontextType.PRESERVE:
                 new_context = current_context
             case InjectionSubcontextType.EMPTY:
                 new_context = InjectionContext.empty()
             case InjectionSubcontextType.SHALLOW:
-                new_context = InjectionContext(
-                    copy.copy(current_context.singletons_available),
-                    cls._get_interface_resolver().shallow_copy()
-                )
+                new_context = current_context.shallow_copied()
             case InjectionSubcontextType.STACK:
-                new_context = InjectionContext.from_lazy_types_stacked(current_context.singletons_available)
+                new_context = current_context.stacked()
             case _:
                 raise ValueError(f"Unknown context kind: {kind}")
-        cls._context_stack.append(new_context)
+        return cls.foreign_contex(new_context)
+
+    @threadsafe
+    @classmethod
+    def foreign_contex(cls, ctx: InjectionContext):
+        cls._context_stack.append(ctx)
         return InjectionContextManager(cls)
 
     @threadsafe

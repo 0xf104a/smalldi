@@ -1,3 +1,4 @@
+import copy
 import enum
 from contextlib import AbstractContextManager
 
@@ -37,29 +38,29 @@ class InjectionContext:  # Thread UNSAFE. Use via Injector
         return cls()
 
     # Case (2): new JIT creation, so singletons unfrozen
-    @classmethod
-    def resetted(cls, inherited_singletons: dict[type, LazySingleton],
-                 interface_resolver: InterfaceResolver) -> 'InjectionContext':
+    def resetted(self) -> 'InjectionContext':
         new_singletons = dict()
-        for key in inherited_singletons:
-            singleton = inherited_singletons[key]
+        for key in self.singletons_available:
+            singleton = self.singletons_available[key]
             new_singletons[key] = LazySingleton(singleton.implementation_cls, singleton.override_cls)
-        return cls(new_singletons, interface_resolver.rewired(new_singletons))
+        return self.__class__(new_singletons, self.interface_resolver.rewired(new_singletons))
 
-    @classmethod
-    def from_lazy_types_stacked(cls, inherited_singletons: dict[type, LazySingleton],
-                                interface_resolver: InterfaceResolver) -> 'InjectionContext':
+    def stacked(self) -> 'InjectionContext':
         new_singletons = dict()
-        for key in inherited_singletons:
-            singleton = inherited_singletons[key]
+        for key in self.singletons_available:
+            singleton = self.singletons_available[key]
             new_impl = None
             if singleton.override_cls is not None:
                 new_impl = singleton.override_cls
             else:
                 new_impl = singleton.implementation_cls
             new_singletons[key] = LazySingleton(new_impl)
-        return cls(new_singletons, interface_resolver.rewired(new_singletons).stacked())
+        return self.__class__(new_singletons, self.interface_resolver.rewired(new_singletons).stacked())
 
+    def shallow_copied(self) -> 'InjectionContext':
+        shallowed_singletons = copy.copy(self.singletons_available)
+        return self.__class__(shallowed_singletons,
+                              self.interface_resolver.rewired(shallowed_singletons))
 
 class InjectionContextManager(AbstractContextManager):
     def __init__(self, injector: 'Injector'):
