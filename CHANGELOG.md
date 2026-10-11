@@ -1,5 +1,29 @@
 # Changelog
 ## 0.4.0
+### Added
+* Injection contexts: `with Injector.context(kind):` runs a block in a child context derived from the current one, so
+  registrations, overrides and instances made inside the block are scoped to it; `__enter__` builds the child and
+  returns the `InjectionContext`, `__exit__` pops exactly the context it pushed, exiting out of order or entering the
+  same manager twice raises `RuntimeError`
+* The five context kinds, members of `smalldi.context.InjectionSubcontextType`: `PRESERVE` (the current context
+  itself), `RESET` (same registrations, implementations and overrides, every singleton a fresh unfrozen one without an
+  instance; the default), `EMPTY` (nothing registered), `SHALLOW` (a new registry sharing the same `LazySingleton`
+  objects, so instances and frozen state are shared and an override of an inherited singleton is visible in the
+  parent) and `STACK` (every effective class becomes a fresh base without override, an interface's override becomes
+  its implementation, so both can be overridden again)
+* `Injector.context(kind)`, `Injector.foreign_context(ctx)`, which pushes a given `InjectionContext` as is, and
+  `Injector.get_context()`, which returns the current context
+* Per-slice context tracking: contexts are kept per execution slice, the running `asyncio.Task` or else the current
+  `threading.Thread`; a slice with nothing pushed sees the root context, and a new thread or Task starts in the root
+  context whatever its creator had open
+* `smalldi.thread.ContextAwareThread`, a `threading.Thread` that captures its creator's current context in `__init__`
+  and enters it for the duration of `run()`
+* A slice that finishes with injection contexts still open has them removed and emits a `ResourceWarning`
+
+### Changed
+* `@Injector.inject` on an `async def` function now returns a coroutine function and resolves its dependencies when
+  the coroutine starts running instead of when the function is called
+
 ### Fixed
 * `@Injector.inject` on an `async def` function returns a coroutine function that resolves `Provide[T]` when the coroutine starts running
 * An instance request and the freezing of what it looks up are one step under the injector's lock: an override that
