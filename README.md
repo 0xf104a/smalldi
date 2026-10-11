@@ -3,8 +3,8 @@ The smallest dependency injection mechanism possible in python.
 SmallDI provides you with an intuitive and simple interface for doing dependency
 injections in your project.
 
-SmallDI is built around three features: [singletons](#singletons), [containers](#containers) and
-[interfaces](#interfaces).
+SmallDI is built around four features: [singletons](#singletons), [containers](#containers),
+[interfaces](#interfaces) and [contexts](#contexts).
 
 # Singletons
 A singleton is a class with exactly one instance, created on first use and passed to every function that
@@ -69,6 +69,10 @@ DI container inside the library. Injector provides these decorators:
   instances of Singleton. Every `Provide[]` dependency must already be registered when the function is decorated,
   otherwise `TypeError` is raised.
 
+Besides the decorators, `Injector.get_instance(T)` returns the instance for a registered singleton or interface,
+creating it if needed, and `Injector.context(kind)` opens a [context](#contexts) in which registrations, overrides and
+instances are scoped to a `with` block.
+
 ## How singletons work
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
 than annotated with `Provide[]` type. Only singletons may be decorated with `@Injector.singleton`. As a consequence, 
@@ -76,7 +80,9 @@ only singleton classes, and interfaces they implement, may be injected at the cu
 Abstract classes can't be singletons.
 
 Singletons are lazy: registering a class doesn't instantiate it. The instance is created, exactly once and in a
-thread-safe way, the first time it is needed, that is when an `@Injector.inject`-decorated function is called.
+thread-safe way, the first time it is needed, that is when an `@Injector.inject`-decorated function is called or
+`Injector.get_instance` is called. The instance belongs to the [context](#contexts) that is current at that moment:
+a `RESET` context gets its own instances, created again on first use inside it.
 Once an instance was requested, a singleton is *frozen* and can no longer be [overridden](#overrides), even if
 creating the instance failed.
 
@@ -85,7 +91,8 @@ A singleton whose constructor requires itself, directly or through its dependenc
 singleton being constructed, deadlock instead and aren't detected.
 
 > [!WARNING]
-> Every class is registered once: registering the same class twice raises `TypeError`. A reloaded module
+> Every class is registered once per [context](#contexts): registering the same class twice in one context raises
+> `TypeError`. A reloaded module
 > (`importlib.reload`) defines new class objects, which are registered as additional singletons next to the old
 > ones without an error. DI is set up once per process; module reloading isn't supported.
 
@@ -95,6 +102,9 @@ instance of `T` should be passed. Caller of function with `Provide[T]` may expli
 override argument annotated with `Provide[T]` by directly passing `annotated_di_arg=my_value`.
 Only keyword arguments are recognized: passing the dependency positionally makes the call raise `TypeError`
 for a duplicate argument.
+
+`@Injector.inject` on an `async def` function returns a coroutine function. Its `Provide[T]` parameters are resolved
+when the coroutine starts running, not when the function is called.
 
 ## `Injector.singletons_available` (deprecated)
 Instances are meant to be reached through injection only. `Injector.singletons_available`, a read-only mapping of
@@ -430,7 +440,8 @@ Overrides apply to interfaces and to [singletons](#singletons) alike.
 
 `@Injector.override` makes another singleton injected instead of an interface's implementation or instead of another
 singleton, for example to swap in a fake in tests or a platform-specific implementation. Like `@Injector.implements`,
-apply it above `@Injector.singleton`.
+apply it above `@Injector.singleton`. An override declared inside a [context](#contexts) is gone once the context is
+left, which is how a fake is scoped to one test.
 
 Continuing the [coffee machine example](#how-interfaces-work), add these classes right before the
 `if __name__ == '__main__':` block:
@@ -495,7 +506,8 @@ Rules:
   * a singleton once it is injected (directly, through an interface it implements, or through a singleton it
     overrides), when `Injector.singletons_available` is read, or, for containers, when the first component is registered.
 
-  So declare overrides before anything injects their targets. Frozen means frozen: nothing rebinds a frozen
+  So declare overrides before anything injects their targets, or declare them inside a `RESET` or `STACK`
+  [context](#contexts), whose singletons and interfaces start unfrozen. Frozen means frozen: nothing rebinds a frozen
   target, the only binding still accepted is the first `@Injector.implements` of an interface that already has an
   override, since the override keeps winning.
 * A singleton target may be overridden by a class that was already injected: the target then shares that instance.
@@ -503,6 +515,172 @@ Rules:
   the override raises `SingletonFrozenError`.
 
 `SingletonFrozenError` can be imported from `smalldi`.
+
+# Contexts
+A context is a registry of singletons and interfaces that a `with Injector.context(kind):` block makes current for
+the code running inside it, so registrations, overrides and instances can be scoped to the block, for example to one
+test.
+
+## Example
+<details>
+<summary>Ryoga's bath</summary>
+
+```python
+import abc
+import enum
+import threading
+
+from smalldi import Injector, Provide
+from smalldi.context import InjectionSubcontextType
+from smalldi.thread import ContextAwareThread
+
+
+class Temperature(enum.Enum):
+    COLD = enum.auto()
+    HOT = enum.auto()
+
+
+@Injector.interface
+class Water(abc.ABC):
+    @abc.abstractmethod
+    def temperature(self) -> Temperature: ...
+
+    @abc.abstractmethod
+    def warm_up(self) -> None: ...
+
+
+@Injector.implements(Water)
+@Injector.singleton
+class TapWater(Water):
+    def __init__(self):
+        self._temperature = Temperature.COLD
+
+    def temperature(self) -> Temperature:
+        return self._temperature
+
+    def warm_up(self) -> None:
+        self._temperature = Temperature.HOT
+
+
+@Injector.singleton
+class Ryoga:
+    @Injector.inject
+    def __init__(self, water: Provide[Water]):
+        self._water = water
+
+    def __str__(self) -> str:
+        return "P-chan" if self._water.temperature() is Temperature.COLD else "Ryoga Hibiki"
+
+
+@Injector.inject
+def take_a_bath(water: Provide[Water]) -> None:
+    water.warm_up()
+
+
+@Injector.inject
+def meet(ryoga: Provide[Ryoga]) -> str:
+    return str(ryoga)
+
+
+def meet_in_another_thread(thread_cls: type[threading.Thread]) -> str:
+    seen = []
+    thread = thread_cls(target=lambda: seen.append(meet()))
+    thread.start()
+    thread.join()
+    return seen[0]
+
+
+def main() -> None:
+    print("Before the bath:", meet())                                    # P-chan
+
+    # RESET keeps the blueprints (singletons, implementations, overrides)
+    # but builds fresh instances: this bath warms up a different Water
+    with Injector.context(InjectionSubcontextType.RESET):
+        take_a_bath()
+        print("In the bath:", meet())                                    # Ryoga Hibiki
+        print("Akane, invited along:", meet_in_another_thread(ContextAwareThread))  # Ryoga Hibiki
+        print("Ranma, outside the door:", meet_in_another_thread(threading.Thread))  # P-chan
+
+    print("After the bath:", meet())                                     # P-chan
+
+    # A context is also where test doubles live: an override registered inside
+    # it disappears together with the context
+    with Injector.context(InjectionSubcontextType.RESET):
+        @Injector.override(Water)
+        @Injector.singleton
+        class CursedSpring(TapWater):
+            def warm_up(self) -> None:
+                pass  # Jusenkyo water stays cold
+
+        take_a_bath()
+        print("In the cursed spring:", meet())                           # P-chan
+
+    with Injector.context(InjectionSubcontextType.RESET):
+        take_a_bath()
+        print("Back home, plain tap water:", meet())                     # Ryoga Hibiki
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</details>
+
+The example shows, in order:
+
+* **An interface and its implementation.** `Water` is registered with `@Injector.interface`, `TapWater` is its
+  implementation, and `Provide[Water]` receives the `TapWater` instance of the current context.
+* **`@Injector.inject` on `__init__`.** `Ryoga` gets its `Water` when it is instantiated, that is the first time
+  `meet()` runs in a context. Each context that creates a `Ryoga` gives it that context's `Water`.
+* **`RESET`.** The first `with` block keeps every registration and binding of the root context but gives every
+  singleton a fresh, unfrozen slot without an instance. `take_a_bath()` warms up the block's own `TapWater`, and
+  `meet()` builds the block's own `Ryoga`, who sees hot water. After the block the root instances are untouched:
+  the root `TapWater` was never warmed, so the root `Ryoga` is still `P-chan`.
+* **`ContextAwareThread` versus `threading.Thread`.** Akane runs in a `ContextAwareThread` created inside the block,
+  which captures the block's context and enters it for the duration of its `run()`, so she meets `Ryoga Hibiki`.
+  Ranma runs in a plain `threading.Thread`, which starts in the root context whatever its creator had open, so he
+  meets the root `Ryoga` next to the cold root `TapWater`: `P-chan`.
+* **An override as a test double scoped to a context.** `CursedSpring` is registered, and overrides `Water`, inside
+  the second `RESET` block. The root `Water` was frozen by the first `meet()`, but the block's copy starts unfrozen,
+  so the override is accepted. Both the registration and the override disappear with the block: the third block
+  resolves `Water` to plain `TapWater` again, and nobody outside the block ever saw `CursedSpring`.
+
+## Context kinds
+`Injector.context(kind)` takes a member of `smalldi.context.InjectionSubcontextType`; `RESET` is the default.
+
+| Kind       | What the new context shares with its parent                                                                                                                                                                                                                                      |
+|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `PRESERVE` | The same `InjectionContext` object as the current one: nothing is copied.                                                                                                                                                                                                        |
+| `RESET`    | The same registrations, implementations and overrides; every singleton is a fresh, unfrozen `LazySingleton` without an instance. Classes sharing one singleton through an override keep sharing one, and interfaces are rebound to the new singletons. The default kind.           |
+| `EMPTY`    | Nothing: no singleton and no interface is registered.                                                                                                                                                                                                                            |
+| `SHALLOW`  | A new registry dict holding the *same* `LazySingleton` objects: instances and frozen state are shared with the parent. Singletons registered inside are invisible to the parent. Overriding an inherited singleton inside the block mutates the shared object and is visible in the parent. |
+| `STACK`    | Each singleton's effective class (its override if it has one, else its own class) becomes the base of a fresh singleton with no override; classes that shared one singleton keep sharing one. An interface's override becomes its implementation, so it can be overridden again.      |
+
+Rules:
+* Contexts are tracked per *execution slice*: the running `asyncio.Task` if code runs inside a Task, otherwise the
+  current `threading.Thread` object. A slice with nothing pushed sees the root context. `Injector.get_context()`
+  returns the current slice's context.
+* A `threading.Thread` starts in the root context, regardless of the context of the thread that created it.
+  `smalldi.thread.ContextAwareThread` captures the creator's current `InjectionContext` in `__init__` (the object
+  itself, not a copy) and enters it for the duration of `run()`.
+* An `asyncio.Task` starts in the root context. Opening injection contexts inside coroutines is not supported.
+  `@Injector.inject` on an `async def` returns a coroutine function and resolves `Provide[T]` when the coroutine starts
+  running.
+* `Injector.context(kind)` and `Injector.foreign_context(ctx)` return a single-use context manager. Nothing is pushed
+  until `__enter__`; the child context is built from the context that is current at `__enter__` time, and `__enter__`
+  returns the `InjectionContext`. `__exit__` pops exactly the context this manager pushed: exiting out of order
+  raises `RuntimeError` and leaves the stack unchanged, and entering the same manager twice raises `RuntimeError`.
+* If a slice ends with contexts still open, they are removed and a `ResourceWarning` is emitted.
+* A registration goes into the context that is current when the decorator runs. Python caches modules: a module
+  first imported inside `with Injector.context(...)` keeps its registrations in that context only, and importing it
+  again at the root does nothing. Import the modules that register singletons at the root.
+* A request for an instance freezes what it looks up in the current context. A `RESET` or `STACK` child starts
+  with everything unfrozen; a `SHALLOW` child shares the parent's frozen state, and `PRESERVE` is the parent.
+
+The [docs](https://github.com/0xf104a/smalldi/blob/master/docs/index.md) have diagrams of what each kind shares with
+its parent and of the per-slice context stacks ([contexts](https://github.com/0xf104a/smalldi/blob/master/docs/contexts.md)),
+the objects behind the registry ([architecture](https://github.com/0xf104a/smalldi/blob/master/docs/architecture.md))
+and the locking model ([concurrency](https://github.com/0xf104a/smalldi/blob/master/docs/concurrency.md)).
 
 # Utilities
 ## Concurrency

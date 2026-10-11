@@ -6,7 +6,17 @@ binds them to each other with overrides and implementations, and fills the
 parameters of `@Injector.inject`-decorated functions that are annotated with
 `Provide[T]`. Singletons are instantiated on first use, at most once each.
 
-Public names: `Injector`, `Provide` and `SingletonFrozenError`.
+Registrations and instances live in injection contexts. `Injector` reads the
+context of the running execution slice, an `asyncio.Task` or a
+`threading.Thread`, which is the root context until `with Injector.context(kind):`
+pushes a child derived from the current one; the kinds are the members of
+`smalldi.context.InjectionSubcontextType`. A new thread starts in the root
+context unless it is a `smalldi.thread.ContextAwareThread`, which runs in the
+context of the code that created it.
+
+Public names: `Injector`, `Provide` and `SingletonFrozenError` from this
+module, `smalldi.context.InjectionSubcontextType` and
+`smalldi.thread.ContextAwareThread`.
 """
 import copy
 import functools
@@ -89,11 +99,22 @@ class Injector:
     transitive: an override can't be overridden, and an overridden singleton
     can't become an override.
 
-    Every registered singleton is held by one `LazySingleton` in
-    `singletons_available`, and every interface by an `InterfaceResolver`
+    Every registered singleton is held by one `LazySingleton` in the
+    current context's registry, and every interface by an `InterfaceResolver`
     entry that refers to those `LazySingleton` objects. An overridden
     singleton and its override share one `LazySingleton`, registered under
     both classes, which creates the override's instance.
+
+    Contexts. All registry state belongs to an `InjectionContext`. Every
+    method reads the context of the running execution slice, an `asyncio.Task`
+    if there is one, else the current `threading.Thread`, through
+    `_context_registry`: the root context, or the innermost context pushed on
+    that slice with `with Injector.context(kind):`. A registration goes into
+    the context current when the decorator runs; an instance request freezes
+    and builds in the context current when it is made. A new thread or Task
+    starts in the root context; `smalldi.thread.ContextAwareThread` enters its
+    creator's context instead. `Injector.get_context` returns the current
+    context, and `Injector.foreign_context` pushes a given one.
 
     Locking. The reentrant class mutex `__class_mutex__` guards the registry:
     `singleton`, `interface`, `override`, `implements`, `is_singleton` and
@@ -101,7 +122,10 @@ class Injector:
     takes it while it checks each `Provide[T]` parameter at decoration time;
     the decorators returned by `override` and `implements` hold it while they
     bind, which also briefly takes the state lock of each `LazySingleton` and
-    interface binding involved. `get_instance` holds the class mutex only to
+    interface binding involved; `get_context` and the `__enter__` and
+    `__exit__` of the manager returned by `context` and `foreign_context` hold
+    it while they read or change the current slice's context stack.
+    `get_instance` holds the class mutex only to
     look the singleton or interface binding up and releases it before any
     instance is requested. A constructor runs under its singleton's build
     lock only, so no lock that guards the registry or a binding is ever held
@@ -427,6 +451,28 @@ class Injector:
 
     @classmethod
     def context(cls, kind: InjectionSubcontextType = InjectionSubcontextType.RESET) -> InjectionContextManager:
+        """
+        Returns a single-use context manager that runs a block in a child of the current context.
+
+        Nothing is pushed until the manager's `__enter__`, which derives the
+        child from the context current at that moment, makes it the current
+        context of the running execution slice and returns it; `__exit__` pops
+        exactly that context. The child is derived according to `kind`, see
+        `InjectionSubcontextType`: `RESET`, the default, keeps every binding
+        and gives every singleton a fresh, unfrozen `LazySingleton` without an
+        instance, so instances created inside the block are gone after it and
+        overrides declared inside it don't leak out. Other threads and Tasks
+        don't see the child: a `threading.Thread` started inside the block
+        runs in the root context, a `smalldi.thread.ContextAwareThread` in the
+        child. Modules first imported inside the block keep their
+        registrations in the child only, because Python imports a module once.
+
+        :param kind: how to derive the child from the current context
+        :return: a context manager whose `__enter__` returns the new `InjectionContext`
+        :raises ValueError: if `kind` is not a member of `InjectionSubcontextType`
+        :raises RuntimeError: from `__enter__`, if the manager was entered before; from `__exit__`,
+            if the context it pushed is not the slice's innermost one, in which case nothing is popped
+        """
         match kind:
             case InjectionSubcontextType.RESET:
                 factory = lambda: cls._context_registry.current_context.resetted()
@@ -444,9 +490,34 @@ class Injector:
 
     @classmethod
     def foreign_context(cls, ctx: InjectionContext) -> InjectionContextManager:
+        """
+        Returns a single-use context manager that makes `ctx` the current context for a block.
+
+        `ctx` is pushed as is, not copied: registrations and instances made
+        inside the block are made in `ctx`, and are seen by every slice that
+        has `ctx` current, which is how `smalldi.thread.ContextAwareThread`
+        runs in its creator's context. Nothing is pushed until `__enter__`,
+        and `__exit__` pops exactly this push.
+
+        :param ctx: the context to run the block in, usually one obtained from `Injector.get_context`
+        :return: a context manager whose `__enter__` returns `ctx`
+        :raises RuntimeError: from `__enter__`, if the manager was entered before; from `__exit__`,
+            if the pushed context is not the slice's innermost one, in which case nothing is popped
+        """
         return InjectionContextManager(cls, lambda: ctx)
 
     @threadsafe
     @classmethod
     def get_context(cls) -> InjectionContext:
+        """
+        Returns the current context of the running execution slice.
+
+        The slice is the running `asyncio.Task` if there is one, else the
+        current `threading.Thread`. With nothing pushed on the slice, the
+        root context is returned; otherwise the context pushed by the
+        innermost open `with Injector.context(...)` or
+        `with Injector.foreign_context(...)` block of this slice.
+
+        :return: the `InjectionContext` every decorator and instance request of this slice uses
+        """
         return cls._context_registry.current_context
