@@ -1,5 +1,6 @@
 # Changelog
 ## 0.4.0
+Migration guides: [0.3 → 0.4](docs/migration/0.3-to-0.4.md), [0.2 → 0.4](docs/migration/0.2-to-0.4.md)
 ### Added
 * Injection contexts: `with Injector.context(kind):` runs a block in a child context derived from the current one, so
   registrations, overrides and instances made inside the block are scoped to it; `__enter__` builds the child and
@@ -33,6 +34,7 @@
   ran a second time. An overriding class whose instance exists shares it with the target, as before
 
 ## 0.3.0
+Migration guide: [0.2 → 0.3](docs/migration/0.2-to-0.3.md)
 ### Breaking changes
 * `@Injector.singleton` no longer instantiates the class when it is applied: the instance is created on first use, at
   most once, so constructor side effects at import time are gone; where you relied on construction at registration,

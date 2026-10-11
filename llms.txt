@@ -35,6 +35,10 @@ Also included: `Container`, a singleton base class that collects classes and fun
 - [docs/index.md](https://github.com/0xf104a/smalldi/blob/master/docs/index.md): index of the documentation pages
 - [docs/architecture.md](https://github.com/0xf104a/smalldi/blob/master/docs/architecture.md): entity diagram of the injector's objects, what `Injector.get_instance` and `@Injector.override` do step by step
 - [docs/contexts.md](https://github.com/0xf104a/smalldi/blob/master/docs/contexts.md): each context kind with a before/after diagram, context trees per thread and task, stack unwinding, the import caveat and the coroutine limitation
+- [docs/migration/index.md](https://github.com/0xf104a/smalldi/blob/master/docs/migration/index.md): which migration guide to follow when upgrading from 0.2 or 0.3
+- [docs/migration/0.2-to-0.3.md](https://github.com/0xf104a/smalldi/blob/master/docs/migration/0.2-to-0.3.md): 0.2 to 0.3: lazy singletons, the deprecated `Injector.singletons_available`, single registration, `typing-extensions`, with search patterns, before/after snippets and a checklist
+- [docs/migration/0.3-to-0.4.md](https://github.com/0xf104a/smalldi/blob/master/docs/migration/0.3-to-0.4.md): 0.3 to 0.4: `Provide[T]` resolved when a coroutine starts, override refusals, contexts replacing registry-clearing fixtures, with search patterns, before/after snippets and a checklist
+- [docs/migration/0.2-to-0.4.md](https://github.com/0xf104a/smalldi/blob/master/docs/migration/0.2-to-0.4.md): the direct path from 0.2 to 0.4, with search patterns, before/after snippets and a checklist
 - [docs/concurrency.md](https://github.com/0xf104a/smalldi/blob/master/docs/concurrency.md): the locks, freeze-on-lookup, override refusals, detected and undetected cycles
 - [Containers](https://github.com/0xf104a/smalldi/blob/master/README.md#containers): collecting components in a singleton container
 - [Concurrency](https://github.com/0xf104a/smalldi/blob/master/README.md#concurrency): the `@synchronized` and `@threadsafe` decorators and their limitations

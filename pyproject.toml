@@ -43,6 +43,7 @@ dependencies = []
 Homepage = "https://github.com/0xf104a/smalldi"
 Documentation = "https://github.com/0xf104a/smalldi/tree/master/docs"
 Changelog = "https://github.com/0xf104a/smalldi/blob/master/CHANGELOG.md"
+Migration = "https://github.com/0xf104a/smalldi/blob/master/docs/migration/index.md"
 Source = "https://github.com/0xf104a/smalldi"
 Issues = "https://github.com/0xf104a/smalldi/issues"
 

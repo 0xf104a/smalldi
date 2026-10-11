@@ -13,4 +13,5 @@ Related:
 
 * [README: Contexts](../README.md#contexts), the example and the rules in short form
 * [CHANGELOG](../CHANGELOG.md), what each release added or changed
+* [Migration](migration/index.md), which guide to follow when upgrading from 0.2 or 0.3
 * [llms.txt](../llms.txt), the whole API in one page for language models
