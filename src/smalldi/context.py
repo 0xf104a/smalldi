@@ -2,6 +2,7 @@ import copy
 import enum
 from contextlib import AbstractContextManager
 
+from smalldi import threadsafe
 from smalldi._singleton import LazySingleton
 from smalldi._interfaces import InterfaceResolver
 
@@ -75,3 +76,12 @@ class InjectionContextManager(AbstractContextManager):
 
     def __exit__(self, _exc_type, _exc_value, _traceback, /):
         self.injector.finalize_context()
+
+class ContextStackManager:
+    def __init__(self, root_context: 'InjectionContext'):
+        self.root_context = root_context
+        self._context_per_id
+
+    @threadsafe
+    def context_stack_for_current_thread(self) -> list[InjectionContext]:
+        pass

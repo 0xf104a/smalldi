@@ -18,6 +18,8 @@ from contextlib import AbstractContextManager
 from enum import Enum, auto
 from typing import Any, Callable
 
+from smalldi import Injector
+
 _INSTANCE_MUTEX_ATTR = "__instance_mutex__"
 _CLASS_MUTEX_ATTR = "__class_mutex__"
 _INSTALL_LOCK = threading.Lock()
@@ -222,3 +224,12 @@ def mutex(fn_mutex: AbstractContextManager):
         return wrapper
 
     return decorate
+
+class ContextAwareThread(threading.Thread):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._sdi_injection_context = Injector.get_context()
+
+    def run(self):
+        with Injector.foreign_context(self._sdi_injection_context):
+            super().run()

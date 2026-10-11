@@ -428,11 +428,11 @@ class Injector:
                 new_context = current_context.stacked()
             case _:
                 raise ValueError(f"Unknown context kind: {kind}")
-        return cls.foreign_contex(new_context)
+        return cls.foreign_context(new_context)
 
     @threadsafe
     @classmethod
-    def foreign_contex(cls, ctx: InjectionContext):
+    def foreign_context(cls, ctx: InjectionContext):
         cls._context_stack.append(ctx)
         return InjectionContextManager(cls)
 
@@ -442,3 +442,8 @@ class Injector:
         if len(cls._context_stack) == 1:
             raise RuntimeError("Finalization of the root context is not allowed")
         cls._context_stack.pop()
+
+    @threadsafe
+    @classmethod
+    def get_context(cls) -> InjectionContext:
+        return cls._context_stack[-1]
