@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "smalldi"
 version = "0.4.0"
-description = "Annotation-driven dependency injection for Python with Provide[T] type hints and decorators."
+description = "Annotation-driven dependency injection for Python: decorators register singletons and interfaces, Provide[T] type hints inject them, overrides swap implementations, scoped contexts isolate tests."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -14,6 +14,7 @@ keywords = [
   "dependency injection", "di", "typing", "annotations",
   "dependency-injection", "inversion-of-control", "ioc", "singleton", "minimal", "lightweight",
   "decorators", "type-hints", "zero-dependency",
+  "test-isolation", "testing", "mocking", "overrides", "interfaces", "context", "thread-safe",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -25,15 +26,19 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
   "Topic :: Software Development :: Libraries",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Software Development :: Testing",
   "Operating System :: OS Independent",
 ]
 dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/0xf104a/smalldi"
-Documentation = "https://github.com/0xf104a/smalldi#readme"
+Documentation = "https://github.com/0xf104a/smalldi/tree/master/docs"
+Changelog = "https://github.com/0xf104a/smalldi/blob/master/CHANGELOG.md"
 Source = "https://github.com/0xf104a/smalldi"
 Issues = "https://github.com/0xf104a/smalldi/issues"
 
