@@ -50,4 +50,5 @@ include = [
   "/LICENSE",
   "/pyproject.toml",
   "/CHANGELOG.md",
+  "/docs",
 ]
