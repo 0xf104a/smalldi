@@ -16,6 +16,7 @@ import warnings
 from inspect import isabstract
 from typing import Any, Callable
 
+from smalldi._context import InjectionContextRegistry
 from smalldi._interfaces import InterfaceResolver
 from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.annotation import _Provide, Provide
@@ -115,18 +116,18 @@ class Injector:
     # Guarded by __class_mutex__: every method that reads or writes these holds
     # it, through @threadsafe, `with cls.__class_mutex__` or @mutex. The mutex
     # is reentrant and is never held while an instance is requested.
-    _context_stack = [InjectionContext.empty()]
+    _context_registry: InjectionContextRegistry = InjectionContextRegistry()
     __class_mutex__ = threading.RLock()
 
     singletons_available = _SingletonsAvailable()
 
     @classmethod
     def _get_singletons_available(cls):
-        return cls._context_stack[-1].singletons_available
+        return cls._context_registry.current_context.singletons_available
 
     @classmethod
     def _get_interface_resolver(cls):
-        return cls._context_stack[-1].interface_resolver
+        return cls._context_registry.current_context.interface_resolver
 
     @classmethod
     def get_instance(cls, tp: type) -> Any:
@@ -414,7 +415,7 @@ class Injector:
     @classmethod
     def context(cls, kind: InjectionSubcontextType = InjectionSubcontextType.RESET) -> InjectionContextManager:
         new_context = None
-        current_context = cls._context_stack[-1]
+        current_context = cls._context_registry.current_context
         match kind:
             case InjectionSubcontextType.RESET:
                 new_context = current_context.resetted()
@@ -433,17 +434,15 @@ class Injector:
     @threadsafe
     @classmethod
     def foreign_context(cls, ctx: InjectionContext):
-        cls._context_stack.append(ctx)
+        cls._context_registry.push_context(ctx)
         return InjectionContextManager(cls)
 
     @threadsafe
     @classmethod
     def finalize_context(cls):
-        if len(cls._context_stack) == 1:
-            raise RuntimeError("Finalization of the root context is not allowed")
-        cls._context_stack.pop()
+        cls._context_registry.pop_context()
 
     @threadsafe
     @classmethod
     def get_context(cls) -> InjectionContext:
-        return cls._context_stack[-1]
+        return cls._context_registry.current_context

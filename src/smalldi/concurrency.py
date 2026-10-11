@@ -18,7 +18,6 @@ from contextlib import AbstractContextManager
 from enum import Enum, auto
 from typing import Any, Callable
 
-from smalldi import Injector
 
 _INSTANCE_MUTEX_ATTR = "__instance_mutex__"
 _CLASS_MUTEX_ATTR = "__class_mutex__"

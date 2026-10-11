@@ -2,7 +2,7 @@ import copy
 import enum
 from contextlib import AbstractContextManager
 
-from smalldi import threadsafe
+from smalldi.concurrency import threadsafe
 from smalldi._singleton import LazySingleton
 from smalldi._interfaces import InterfaceResolver
 
