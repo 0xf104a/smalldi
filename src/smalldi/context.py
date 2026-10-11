@@ -3,7 +3,6 @@ import enum
 from contextlib import AbstractContextManager
 from typing import Callable
 
-from smalldi.concurrency import threadsafe
 from smalldi._singleton import LazySingleton
 from smalldi._interfaces import InterfaceResolver
 
@@ -90,12 +89,3 @@ class InjectionContextManager(AbstractContextManager):
             if self._token is None:
                 raise RuntimeError("Injection context manager was exited without being entered")
             self.injector._context_registry.pop_context(self._token)
-
-class ContextStackManager:
-    def __init__(self, root_context: 'InjectionContext'):
-        self.root_context = root_context
-        self._context_per_id
-
-    @threadsafe
-    def context_stack_for_current_thread(self) -> list[InjectionContext]:
-        pass
