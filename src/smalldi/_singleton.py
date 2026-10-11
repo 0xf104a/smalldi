@@ -134,6 +134,8 @@ class LazySingleton:
                     if self._override is not None:
                         self._instance = self._override()
                     else:
+                        if self._cls is None:
+                            raise TypeError(f"Singleton {self._name} has no class to instantiate")
                         self._instance = self._cls()
                 return self._instance
             finally:

@@ -75,7 +75,7 @@ class Container:
         :raises Exception: any exception raised by the container's constructor propagates unchanged
         """
         if not Injector.is_singleton(cls):
-            raise TypeError(f"Injector must be a singleton to use components")
+            raise TypeError("Injector must be a singleton to use components")
         if component is None:
             raise TypeError("Component cannot be None")
         this = Injector.get_instance(cls)

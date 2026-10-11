@@ -1,7 +1,6 @@
 """
 Interfaces and their bindings to the singletons implementing or overriding them, used by `Injector`.
 """
-import copy
 import threading
 from inspect import isabstract
 from typing import Any, Type
@@ -142,7 +141,7 @@ class _LazyInterfaceImpl:
         """
         return self.resolve().get_instance()
 
-    def stacked(self) -> 'InterfaceResolver':
+    def stacked(self) -> '_LazyInterfaceImpl':
         new_instance = self.__class__(self.interface)
         my_impl = None
         if self.override_singleton is not None:
@@ -274,7 +273,7 @@ class InterfaceResolver:
 
     @threadsafe
     def stacked(self) -> 'InterfaceResolver':
-        new_interfaces = dict()
+        new_interfaces: dict[type, _LazyInterfaceImpl] = dict()
         for interface, target in self._interfaces.items():
             new_interfaces[interface] = target.stacked()
         return InterfaceResolver(new_interfaces)

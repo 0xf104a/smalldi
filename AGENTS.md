@@ -6,10 +6,14 @@ The package lives in `src/smalldi/`, the tests in `src/tests/`.
 ## Module layout
 
 - `src/smalldi/__init__.py`: `Injector` (the static registry and its decorators `singleton`, `interface`, `implements`, `override`, `inject`), `Injector.get_instance`, `Injector.is_singleton`, `Injector.is_interface`, the deprecated `Injector.singletons_available` descriptor, and the public re-exports `Provide` and `SingletonFrozenError`.
-- `src/smalldi/_singleton.py`: `LazySingleton`, the lazily built single instance of a registered class, with delegation to an override, freezing and the circular-dependency check; `SingletonFrozenError`.
+- `src/smalldi/_singleton.py`: `LazySingleton`, the lazily built single instance of a registered class or of the class overriding it, with freezing and the circular-dependency check; `SingletonFrozenError`.
 - `src/smalldi/_interfaces.py`: `InterfaceResolver`, the registry of interfaces, and `_LazyInterfaceImpl`, one interface's binding to the `LazySingleton` objects implementing and overriding it.
+- `src/smalldi/context.py`: `InjectionContext`, `InjectionSubcontextType` and `InjectionContextManager`.
+- `src/smalldi/_context/__init__.py`: `InjectionContextRegistry`, the per-slice current context, with a `ResourceWarning` for contexts left open.
+- `src/smalldi/_context/tree.py`: `ContextTree`, the per-slice context stacks.
+- `src/smalldi/thread.py`: `ContextAwareThread`.
 - `src/smalldi/annotation.py`: `Provide[T]` (an `Annotated` alias) and the helpers that read it from a function signature.
-- `src/smalldi/asynchronous.py`: `wrap_coroutine_function`, the coroutine-function wrapper `Injector.inject` returns for an `async def` function, and `is_coroutine_function`.
+- `src/smalldi/asynchronous.py`: `wrap_coroutine_function`, the coroutine-function wrapper `Injector.inject` returns for an `async def` function.
 - `src/smalldi/container.py`: `Container`, a singleton base class collecting components registered with `@MyContainer.component`, and `ComponentRegistration`.
 - `src/smalldi/collector.py`: `Collector.collect_from_package`, which imports every module of a package so its decorators run.
 - `src/smalldi/concurrency.py`: `@synchronized`, `@threadsafe` and the `mutex` decorator factory, the reentrant-lock helpers used throughout the package.
@@ -28,8 +32,8 @@ Tests need no installation beyond pytest: `src/` is the import root. `src/tests/
 
 ## Design invariants
 
-- There is exactly one `LazySingleton` per registered class, owned by `Injector._singletons_available`. Interface bindings (`_LazyInterfaceImpl`) refer to those objects and never create their own.
-- Overrides are not transitive. No code follows chains of bindings or walks graphs: there is no recursive graph traversal and no cycle-detection walk. Resolution is at most one interface lookup followed by at most one delegation hop.
+- Registries are per `InjectionContext`. Within one context there is one `LazySingleton` per registered class, owned by the context's `singletons_available`; an override aliases registry keys, so the overridden class and the overriding class map to one `LazySingleton` object. Interface bindings (`_LazyInterfaceImpl`) refer to those objects and never create their own.
+- Overrides are not transitive. No code follows chains of bindings or walks graphs: there is no recursive graph traversal and no cycle-detection walk. Resolution is at most one interface lookup followed by one `LazySingleton`, which instantiates its override class if set, else its own class; there is no delegation.
 - Validation happens before mutation: every check of a binding or registration runs before anything changes, so a failed call leaves the registry and every binding as they were.
 - Frozen means frozen. A singleton is frozen the first time its instance is requested, an interface the first time an instance is requested through it, even if that request failed. Nothing unfreezes a target; a frozen target accepts no override, and an interface accepts an implementation after freezing only if it already has an override. `Injector.get_instance` freezes the looked-up singleton, or the interface and the singleton it resolves to, under the class mutex together with the lookup. An overriding class that is frozen shares its instance with the target; if it is frozen without an instance (constructor in flight or failed), the override raises `SingletonFrozenError` and never waits for that constructor.
 - Decorator order: `@Injector.override(...)` and `@Injector.implements(...)` go above `@Injector.singleton`, because both require the decorated class to be a registered singleton already.

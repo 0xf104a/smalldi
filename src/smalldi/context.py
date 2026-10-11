@@ -11,10 +11,13 @@ context is derived from its parent.
 import copy
 import enum
 from contextlib import AbstractContextManager
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
 from smalldi._singleton import LazySingleton
 from smalldi._interfaces import InterfaceResolver
+
+if TYPE_CHECKING:
+    from smalldi import Injector
 
 
 class InjectionSubcontextType(enum.Enum):

@@ -7,18 +7,7 @@ starts running, not when the function is called, so the instances come from
 the injection context current at that moment.
 """
 import functools
-import inspect
 from typing import Any, Callable
-
-
-def is_coroutine_function(fn: Callable) -> bool:
-    """
-    Tells whether a function must be wrapped by `wrap_coroutine_function`.
-
-    :param fn: function to check
-    :return: True if `fn` is an `async def` function
-    """
-    return inspect.iscoroutinefunction(fn)
 
 
 def wrap_coroutine_function(fn: Callable, name2type: dict[str, type],

@@ -1,13 +1,13 @@
 """
 A set whose operations are serialized by a lock, used by `LazySingleton` to track constructing threads.
 """
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 from smalldi.concurrency import threadsafe
 
 _T = TypeVar('_T')
 
-class AtomicSet:
+class AtomicSet(Generic[_T]):
     """
     Set whose methods are each guarded by a reentrant lock stored on the instance.
 

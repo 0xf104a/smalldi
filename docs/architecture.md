@@ -4,8 +4,8 @@
 state is a single `InjectionContextRegistry`, which knows the root `InjectionContext` and, per execution slice, which
 context is current. An `InjectionContext` is one registry of singletons (`dict[type, LazySingleton]`) and one
 `InterfaceResolver` holding a binding per registered interface. Nothing in the library walks graphs: a lookup is at
-most one interface binding followed by one `LazySingleton`, and the `LazySingleton` delegates at most one hop, to its
-override class.
+most one interface binding followed by one `LazySingleton`, and the `LazySingleton` instantiates its override class if it
+has one, else its own class.
 
 ## Entities
 

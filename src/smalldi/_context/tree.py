@@ -78,10 +78,11 @@ class ContextTree:
             raise RuntimeError(f"Context to finish is not the current context of slice id {slice_id}")
         if node is None:
             raise ValueError(f"Context for slice id {slice_id} not found")
-        if node.parent is self._root_node:
+        parent = node.parent
+        if parent is None or parent is self._root_node:
             del self._context_slice[slice_id]
         else:
-            self._context_slice[slice_id] = node.parent
+            self._context_slice[slice_id] = parent
 
     @threadsafe
     def add_context_for(self, slice_id: Hashable, ctx: InjectionContext) -> _ContextTreeNode:

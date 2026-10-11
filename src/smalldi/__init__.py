@@ -18,8 +18,8 @@ Public names: `Injector`, `Provide` and `SingletonFrozenError` from this
 module, `smalldi.context.InjectionSubcontextType` and
 `smalldi.thread.ContextAwareThread`.
 """
-import copy
 import functools
+import inspect
 import threading
 import types
 import warnings
@@ -27,10 +27,9 @@ from inspect import isabstract
 from typing import Any, Callable
 
 from smalldi._context import InjectionContextRegistry
-from smalldi._interfaces import InterfaceResolver
 from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.annotation import _Provide, Provide
-from smalldi.asynchronous import is_coroutine_function, wrap_coroutine_function
+from smalldi.asynchronous import wrap_coroutine_function
 from smalldi.concurrency import threadsafe, mutex
 from smalldi.context import InjectionContext, InjectionSubcontextType, InjectionContextManager
 from smalldi.decorator import staticclass
@@ -223,7 +222,7 @@ class Injector:
                     raise TypeError(f"Singleton {tp} is not available")
             name2type[name] = tp
 
-        if is_coroutine_function(fn):
+        if inspect.iscoroutinefunction(fn):
             return wrap_coroutine_function(fn, name2type, cls.get_instance)
 
         @functools.wraps(fn)
