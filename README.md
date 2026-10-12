@@ -298,7 +298,12 @@ class CoheeNeko:
         self.money = 0x29A01 # She spends THAT much on coffee?! What does she even do to get THIS amount of money?
         self.beans = 0
         while self.money > 0:
-            bean = coffee_dealer.buy(1)
+            try:
+                bean = coffee_dealer.buy(1)
+            except ValueError as e:
+                # Kansai-Neko's stock runs out long before her money does
+                print(f"{type(e).__name__}: {e}")
+                break
             self.money -= 1
             if bean.kind is BeanKind.DECAF_BEAN:
                 print("Ewww...Decaf...*throws away*")
@@ -317,12 +322,7 @@ def main(cohee_neko: Provide[CoheeNeko]) -> int:
     return 0
 
 if __name__ == '__main__':
-    try:
-        sys.exit(main())
-    except ValueError as e:
-        # Cohee-Neko is injected before main() runs, so Kansai-Neko's empty stock surfaces here
-        print(f"{type(e).__name__}: {e}")
-        sys.exit(1)
+    sys.exit(main())
 ```
 
 </details>

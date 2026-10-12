@@ -5,6 +5,11 @@
   build README.md, `docs/`, CHANGELOG.md, llms.txt and a mkdocstrings API reference with Zensical, styled by the
   Material 3 stylesheet `docs/assets/material3.css`; the CI docs job builds the site in strict mode
 
+### Fixed
+* The README interfaces example exits with status 0 whether or not Ootani is on patrol: Cohee-Neko stops buying when
+  Kansai-Neko's stock runs out instead of the example exiting with status 1, which failed the docs check outside
+  22:00-06:00 UTC
+
 ## 0.4.0
 Migration guides: [0.3 → 0.4](docs/migration/0.3-to-0.4.md), [0.2 → 0.4](docs/migration/0.2-to-0.4.md)
 ### Added
