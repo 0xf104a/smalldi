@@ -69,6 +69,7 @@ if __name__ == '__main__':
 ## Injector
 Injector is a static class(i.e., one that should never be instantiated) which is the main (and currently the only)
 DI container inside the library. Injector provides these decorators:
+
 * `@Injector.singleton` registers a class whose instance may further be injected in functions
 * `@Injector.interface` marks an abstract class as an [interface](#interfaces) singletons may implement
 * `@Injector.implements(...)` declares which interface a singleton implements
@@ -202,6 +203,7 @@ to registrations; the default does nothing.
 ## ComponentRegistration
 `ComponentRegistration` is a dataclass which holds information about registered component which
 consists of:
+
 * `component`: an actual component type
 * `args`: arguments passed to `@MyContainer.component` during registration
 * `kwargs`: keyword arguments passed to `@MyContainer.component` during registration
@@ -428,6 +430,7 @@ if __name__ == '__main__':
 </details>
 
 Rules:
+
 * Each interface has at most one implementation; declaring a second one raises `RuntimeError`.
 * `@Injector.implements` takes one interface. A singleton implementing several interfaces stacks the decorator,
   once per interface, above `@Injector.singleton`.
@@ -493,6 +496,7 @@ decorator does nothing and the class stays a plain singleton. The [Interfaces ex
 Ootani on patrol.
 
 Rules:
+
 * The overriding class must be a singleton and a subclass of its target; a class can't override itself.
   `@Injector.override` takes one target.
 * An overridden singleton is never instantiated through the injector, and `Injector.singletons_available` maps it to its
@@ -665,6 +669,7 @@ The example shows, in order:
 | `STACK`    | Each singleton's effective class (its override if it has one, else its own class) becomes the base of a fresh singleton with no override; classes that shared one singleton keep sharing one. An interface's override becomes its implementation, so it can be overridden again.      |
 
 Rules:
+
 * Contexts are tracked per *execution slice*: the running `asyncio.Task` if code runs inside a Task, otherwise the
   current `threading.Thread` object. A slice with nothing pushed sees the root context. `Injector.get_context()`
   returns the current slice's context.
@@ -693,6 +698,7 @@ and the locking model ([concurrency](https://github.com/0xf104a/smalldi/blob/mas
 # Utilities
 ## Concurrency
 `smalldi.concurrency` provides two decorators for serializing calls between threads:
+
 * `@synchronized` guards a function with its own reentrant lock, shared by every caller.
 * `@threadsafe` picks the lock from where the method is defined:
   * instance methods lock per instance,

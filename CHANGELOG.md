@@ -1,4 +1,10 @@
 # Changelog
+## Unreleased
+### Added
+* A documentation site on Read the Docs: `zensical.toml`, `.readthedocs.yaml` and `.github/scripts/stage_docs.py`
+  build README.md, `docs/`, CHANGELOG.md, llms.txt and a mkdocstrings API reference with Zensical, styled by the
+  Material 3 stylesheet `docs/assets/material3.css`; the CI docs job builds the site in strict mode
+
 ## 0.4.0
 Migration guides: [0.3 → 0.4](docs/migration/0.3-to-0.4.md), [0.2 → 0.4](docs/migration/0.2-to-0.4.md)
 ### Added

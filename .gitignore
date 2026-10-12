@@ -3,3 +3,5 @@
 *.sw?
 dist
 *.pyc
+_docs
+site

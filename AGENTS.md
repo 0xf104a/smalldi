@@ -22,6 +22,27 @@ The package lives in `src/smalldi/`, the tests in `src/tests/`.
 - `src/smalldi/wrappers.py`: compatibility alias re-exporting `staticclass` from `smalldi.decorator`.
 - `src/smalldi/py.typed`: marker that the package is typed.
 
+## Documentation site
+
+The site at https://smalldi.readthedocs.io/ is built by [Zensical](https://zensical.org/) from a staged copy of the
+Markdown files, so the files themselves stay where GitHub renders them:
+
+- `zensical.toml`: the site configuration; `docs_dir` is `_docs`, the staged copy, which is git-ignored.
+- `.github/scripts/stage_docs.py`: writes `_docs/`: README.md as the landing page `index.md`, `docs/` as the `docs/`
+  section, CHANGELOG.md, llms.txt, and a generated `api.md` of mkdocstrings directives for every public module. It
+  rewrites links in the copies only: links from `docs/` up to README.md point to `index.md`, and README links to
+  repository files through GitHub point to the pages in the site.
+- `docs/assets/material3.css`: the Material 3 token adapter, the tonal palettes of f104a.io mapped onto the theme's
+  `--md-*` variables, plus the component shapes.
+- `docs/requirements.txt`: the pinned site generator, installed by Read the Docs and the CI docs job only; it is not
+  a runtime dependency.
+- `.readthedocs.yaml`: installs the requirements, stages, builds with `zensical build --clean --strict` and copies
+  `site/` to the Read the Docs output directory.
+
+Build locally with `python .github/scripts/stage_docs.py && zensical build --strict`, or `zensical serve` after
+staging; re-run the staging script after editing a page. Python-Markdown needs a blank line before a list that
+follows a paragraph, otherwise the list renders inline; GitHub is lenient about that, the site is not.
+
 ## Running the tests
 
 ```shell
