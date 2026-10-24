@@ -79,3 +79,23 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+
+  docs-latest:
+    # Read the Docs rebuilds `latest` on pushes to master, not on tag pushes, so the release triggers the rebuild
+    # that makes `latest` document this release (see .github/scripts/checkout_latest_release.sh).
+    runs-on: ubuntu-latest
+    needs:
+      - release-build
+
+    steps:
+      - name: Rebuild the Read the Docs version latest from the release tag
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+        run: |
+          if [ -z "$READTHEDOCS_TOKEN" ]; then
+            echo "::warning::READTHEDOCS_TOKEN is not set; trigger the build of latest in the Read the Docs dashboard"
+            exit 0
+          fi
+          curl --fail --silent --show-error -X POST \
+            -H "Authorization: Token $READTHEDOCS_TOKEN" \
+            https://app.readthedocs.org/api/v3/projects/smalldi/versions/latest/builds/

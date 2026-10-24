@@ -8,6 +8,9 @@ build:
   tools:
     python: "3.13"
   jobs:
+    # The version `latest` documents the latest release: the script checks out the highest release tag.
+    post_checkout:
+      - sh .github/scripts/checkout_latest_release.sh
     install:
       - pip install -r docs/requirements.txt
     pre_build:
