@@ -15,7 +15,6 @@ import inspect
 import threading
 import warnings
 from contextlib import AbstractContextManager
-from enum import Enum, auto
 from typing import Any, Callable
 
 from smalldi.decorator import FunctionPlacement
