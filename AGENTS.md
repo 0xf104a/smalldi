@@ -5,10 +5,10 @@ The package lives in `src/smalldi/`, the tests in `src/tests/`.
 
 ## Module layout
 
-- `src/smalldi/__init__.py`: `Injector` (the static registry and its decorators `singleton`, `interface`, `implements`, `override`, `inject`), `Injector.get_instance`, `Injector.is_singleton`, `Injector.is_interface`, the deprecated `Injector.singletons_available` descriptor, and the public re-exports `Provide` and `SingletonFrozenError`.
+- `src/smalldi/__init__.py`: `Injector` (the static registry and its decorators `singleton`, `interface`, `implements`, `override`, `inject`), `Injector.context`, which dispatches on its argument to the kind path (an `InjectionSubcontextType` member, `RESET` by default) or the declared path (an `InjectionContextSingletonOverride` subclass or instance), `Injector.get_instance`, `Injector.is_singleton`, `Injector.is_interface`, the deprecated `Injector.singletons_available` descriptor, and the public re-exports `Provide` and `SingletonFrozenError`.
 - `src/smalldi/_singleton.py`: `LazySingleton`, the lazily built single instance of a registered class or of the class overriding it, with freezing and the circular-dependency check; `SingletonFrozenError`.
 - `src/smalldi/_interfaces.py`: `InterfaceResolver`, the registry of interfaces, and `_LazyInterfaceImpl`, one interface's binding to the `LazySingleton` objects implementing and overriding it.
-- `src/smalldi/context.py`: `InjectionContext`, `InjectionSubcontextType` and `InjectionContextManager`.
+- `src/smalldi/context.py`: `InjectionContext`, `InjectionSubcontextType`, `InjectionContextManager`, and `InjectionContextSingletonOverride` with the `CopyOf[T]` annotation, the dataclass declaration of a `SHALLOW` child.
 - `src/smalldi/_context/__init__.py`: `InjectionContextRegistry`, the per-slice current context, with a `ResourceWarning` for contexts left open.
 - `src/smalldi/_context/tree.py`: `ContextTree`, the per-slice context stacks.
 - `src/smalldi/thread.py`: `ContextAwareThread`.
@@ -36,8 +36,15 @@ Markdown files, so the files themselves stay where GitHub renders them:
   `--md-*` variables, plus the component shapes.
 - `docs/requirements.txt`: the pinned site generator, installed by Read the Docs and the CI docs job only; it is not
   a runtime dependency.
-- `.readthedocs.yaml`: installs the requirements, stages, builds with `zensical build --clean --strict` and copies
-  `site/` to the Read the Docs output directory.
+- `.readthedocs.yaml`: checks out the release to document, installs the requirements, stages, builds with
+  `zensical build --clean --strict` and copies `site/` to the Read the Docs output directory.
+- `.github/scripts/checkout_latest_release.sh`: the `post_checkout` job. The version `latest` documents the latest
+  release, not the head of master: for that version the script fetches the tags and checks out the highest release
+  tag (`MAJOR.MINOR.PATCH`, optional `v` prefix, no pre-releases); every other version builds the commit it was
+  cloned at. A release that predates the site cancels the build (exit status 183), which keeps the published
+  `latest`. Read the Docs rebuilds `latest` on pushes to master only, so the `docs-latest` job of
+  `.github/workflows/publish.yaml` triggers the rebuild on a release through the Read the Docs API with the
+  repository secret `READTHEDOCS_TOKEN`; without the secret it warns instead.
 
 Build locally with `python .github/scripts/stage_docs.py && zensical build --strict`, or `zensical serve` after
 staging; re-run the staging script after editing a page. Python-Markdown needs a blank line before a list that

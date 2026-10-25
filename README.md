@@ -690,6 +690,127 @@ Rules:
 * A request for an instance freezes what it looks up in the current context. A `RESET` or `STACK` child starts
   with everything unfrozen; a `SHALLOW` child shares the parent's frozen state, and `PRESERVE` is the parent.
 
+## Declared contexts
+`smalldi.context.InjectionContextSingletonOverride` is a dataclass base whose fields declare a `SHALLOW` child
+context: a plain class is made injectable in the block, `CopyOf[T]` gives the block its own copy of a singleton, and
+a default value becomes the singleton's instance.
+
+```python
+import dataclasses
+
+from smalldi import Injector, Provide, SingletonFrozenError
+from smalldi.context import InjectionContextSingletonOverride, CopyOf
+
+
+@Injector.singleton
+class CookieJar:
+    def __init__(self):
+        self.cookies = 3
+
+    def take(self):
+        self.cookies -= 1
+        return "cookie"
+
+
+@Injector.singleton
+class NapSpot:
+    def __init__(self, name="the sofa"):
+        self.name = name
+
+
+class SnackBowl:
+    def __init__(self, snacks=5):
+        self.snacks = snacks
+
+
+@Injector.inject
+def snack_time(who, jar: Provide[CookieJar] = None, spot: Provide[NapSpot] = None):
+    print(f"{who} takes a {jar.take()} ({jar.cookies} left) and naps on {spot.name}")
+
+
+snack_time("Pusheen")  # Pusheen takes a cookie (2 left) and naps on the sofa
+
+
+# Stormy comes to visit. She gets her own cookie jar, a snack bowl nobody else
+# has, and a nap spot of her own, while Pusheen's things stay as they are.
+@dataclasses.dataclass
+class StormyVisits(InjectionContextSingletonOverride):
+    jar: CopyOf[CookieJar]                              # the block's own copy of the jar: full again
+    bowl: SnackBowl                                     # not registered outside: injectable in the block only
+    spot: CopyOf[NapSpot] = NapSpot("the windowsill")   # the block's own NapSpot, with this instance
+
+
+with Injector.context(StormyVisits):
+    snack_time("Stormy")  # Stormy takes a cookie (2 left) and naps on the windowsill
+    print(Injector.get_instance(SnackBowl).snacks)  # 5
+
+# Pip visits with a bowl of his own: an instance gives the values, and None presets nothing.
+with Injector.context(StormyVisits(jar=None, bowl=SnackBowl(snacks=2), spot=NapSpot("the cardboard box"))):
+    snack_time("Pip")  # Pip takes a cookie (2 left) and naps on the cardboard box
+    print(Injector.get_instance(SnackBowl).snacks)  # 2
+
+snack_time("Pusheen")  # Pusheen takes a cookie (1 left) and naps on the sofa
+print(Injector.is_singleton(SnackBowl))  # False
+
+
+# Without CopyOf, a default goes to the shared singleton, so everybody sees it.
+# Pusheen already napped on the sofa: the root NapSpot is frozen and refuses.
+@dataclasses.dataclass
+class PipMovesTheSofa(InjectionContextSingletonOverride):
+    spot: NapSpot = NapSpot("the cardboard box")
+
+
+try:
+    with Injector.context(PipMovesTheSofa):
+        pass
+except SingletonFrozenError as e:
+    print(type(e).__name__)  # SingletonFrozenError
+
+
+@Injector.singleton
+class Blanket:
+    def __init__(self, colour="grey"):
+        self.colour = colour
+
+
+# Nobody asked for the blanket yet, so the shared Blanket takes Pip's instance and keeps it.
+@dataclasses.dataclass
+class PipBringsABlanket(InjectionContextSingletonOverride):
+    blanket: Blanket = Blanket("pink")
+
+
+with Injector.context(PipBringsABlanket):
+    print(Injector.get_instance(Blanket).colour)  # pink
+print(Injector.get_instance(Blanket).colour)  # pink
+```
+
+Rules:
+
+* Subclass `InjectionContextSingletonOverride`, decorate the subclass with `@dataclasses.dataclass` and pass it to
+  `Injector.context`, which returns its usual single-use context manager. The class form, `Injector.context(Fixture)`,
+  takes the fields' defaults as the values; the instance form, `Injector.context(Fixture(...))`, takes the instance's
+  attributes, and a value of None presets nothing. `Fixture.apply(context)`, on the class or an instance, derives the
+  same child from a given `InjectionContext` and returns it without pushing it. Fields without a default go first, as in every dataclass. A
+  subclass without the decorator works in the class form, through its annotations and class attributes.
+* The child is the `SHALLOW` kind: every singleton inherited from the parent is the parent's own `LazySingleton`
+  object unless a field says otherwise.
+* `name: T` without a default makes `T` injectable. An unregistered `T` is registered in the child only, as an
+  interface if it is abstract and as a singleton otherwise, and is constructed on first use. A registered `T` is left
+  as it is.
+* `name: CopyOf[T]` gives the child its own `LazySingleton` for `T`, cloned as `RESET` clones it: same class and
+  override class, no instance, not frozen. Instances created and overrides declared for `T` in the block stay in the
+  block. Classes sharing one singleton with `T` share the copy. For an interface, the singleton it resolves to is
+  copied. `T` must be registered.
+* `name: T = instance`, or `dataclasses.field(default_factory=...)`, makes `instance` the instance of `T`'s singleton
+  and freezes it. For a registered `T` that is the shared singleton, so the parent injects `instance` from then on,
+  and a frozen one raises `SingletonFrozenError`. For an interface it is the singleton the interface resolves to. An
+  unregistered `T` is registered in the child only, with `instance`. `instance` is not checked against `T`.
+* `name: CopyOf[T] = instance` gives the copy the instance, so the preset is scoped to the block.
+* A default factory runs once per `Injector.context()` or `apply()` call in the class form, and never in the
+  instance form, where the dataclass constructor ran it already. Everything else is checked at `__enter__` against the context
+  current then, before anything changes: a refused `__enter__` pushes nothing and changes nothing. Two fields of one
+  type, a `Provide[T]` field or an annotation that is not a class raise `TypeError` from `Injector.context()`.
+
 The [docs](https://github.com/0xf104a/smalldi/blob/master/docs/index.md) have diagrams of what each kind shares with
 its parent and of the per-slice context stacks ([contexts](https://github.com/0xf104a/smalldi/blob/master/docs/contexts.md)),
 the objects behind the registry ([architecture](https://github.com/0xf104a/smalldi/blob/master/docs/architecture.md))

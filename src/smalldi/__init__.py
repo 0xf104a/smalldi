@@ -9,8 +9,10 @@ parameters of `@Injector.inject`-decorated functions that are annotated with
 Registrations and instances live in injection contexts. `Injector` reads the
 context of the running execution slice, an `asyncio.Task` or a
 `threading.Thread`, which is the root context until `with Injector.context(kind):`
-pushes a child derived from the current one; the kinds are the members of
-`smalldi.context.InjectionSubcontextType`. A new thread starts in the root
+pushes a child derived from the current one; `kind` is a member of
+`smalldi.context.InjectionSubcontextType`, or an
+`smalldi.context.InjectionContextSingletonOverride` subclass or instance
+declaring the child's singletons field by field. A new thread starts in the root
 context unless it is a `smalldi.thread.ContextAwareThread`, which runs in the
 context of the code that created it.
 
@@ -31,7 +33,8 @@ from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.annotation import _Provide, Provide
 from smalldi.asynchronous import wrap_coroutine_function
 from smalldi.concurrency import threadsafe, mutex
-from smalldi.context import InjectionContext, InjectionSubcontextType, InjectionContextManager
+from smalldi.context import (InjectionContext, InjectionSubcontextType, InjectionContextManager,
+                             InjectionContextSingletonOverride, _DeclaredContext)
 from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
@@ -444,28 +447,61 @@ class Injector:
         return target in cls._get_singletons_available()
 
     @classmethod
-    def context(cls, kind: InjectionSubcontextType = InjectionSubcontextType.RESET) -> InjectionContextManager:
+    def context(cls, kind: InjectionSubcontextType | type[InjectionContextSingletonOverride]
+                | InjectionContextSingletonOverride = InjectionSubcontextType.RESET) -> InjectionContextManager:
         """
         Returns a single-use context manager that runs a block in a child of the current context.
 
         Nothing is pushed until the manager's `__enter__`, which derives the
         child from the context current at that moment, makes it the current
         context of the running execution slice and returns it; `__exit__` pops
-        exactly that context. The child is derived according to `kind`, see
-        `InjectionSubcontextType`: `RESET`, the default, keeps every binding
-        and gives every singleton a fresh, unfrozen `LazySingleton` without an
-        instance, so instances created inside the block are gone after it and
-        overrides declared inside it don't leak out. Other threads and Tasks
-        don't see the child: a `threading.Thread` started inside the block
-        runs in the root context, a `smalldi.thread.ContextAwareThread` in the
-        child. Modules first imported inside the block keep their
-        registrations in the child only, because Python imports a module once.
+        exactly that context. `kind` says how the child is derived:
+
+        * a member of `InjectionSubcontextType`: `RESET`, the default, keeps
+          every binding and gives every singleton a fresh, unfrozen
+          `LazySingleton` without an instance, so instances created inside the
+          block are gone after it and overrides declared inside it don't leak
+          out; see the enum for the other kinds;
+        * a subclass of `InjectionContextSingletonOverride`: the `SHALLOW`
+          child its fields declare, with the fields' defaults as the preset
+          instances;
+        * an instance of such a subclass: the same child, with the instance's
+          attributes as the preset instances.
+
+        Other threads and Tasks don't see the child: a `threading.Thread`
+        started inside the block runs in the root context, a
+        `smalldi.thread.ContextAwareThread` in the child. Modules first
+        imported inside the block keep their registrations in the child only,
+        because Python imports a module once.
 
         :param kind: how to derive the child from the current context
         :return: a context manager whose `__enter__` returns the new `InjectionContext`
-        :raises ValueError: if `kind` is not a member of `InjectionSubcontextType`
+        :raises ValueError: if `kind` is none of the above
+        :raises TypeError: for a declared child, if a field's annotation is `Provide[T]` or isn't a
+            class, or two fields declare one class; from `__enter__`, if a `CopyOf[T]` names an
+            unregistered class, two fields resolve to one singleton, or a copied or preset interface
+            has no implementation
+        :raises SingletonFrozenError: from `__enter__` of a declared child, if a default is set on a
+            shared singleton that is frozen
         :raises RuntimeError: from `__enter__`, if the manager was entered before; from `__exit__`,
             if the context it pushed is not the slice's innermost one, in which case nothing is popped
+        """
+        if isinstance(kind, InjectionSubcontextType):
+            return cls._kind_context(kind)
+        if isinstance(kind, type) and issubclass(kind, InjectionContextSingletonOverride):
+            return cls._declared_context(kind._from_class())
+        if isinstance(kind, InjectionContextSingletonOverride):
+            return cls._declared_context(kind._from_instance())
+        raise ValueError(f"Unknown context kind: {kind}")
+
+    @classmethod
+    def _kind_context(cls, kind: InjectionSubcontextType) -> InjectionContextManager:
+        """
+        The `Injector.context` path for a member of `InjectionSubcontextType`.
+
+        :param kind: how to derive the child from the current context
+        :return: the context manager
+        :raises ValueError: if `kind` is not a member of `InjectionSubcontextType`
         """
         match kind:
             case InjectionSubcontextType.RESET:
@@ -481,6 +517,16 @@ class Injector:
             case _:
                 raise ValueError(f"Unknown context kind: {kind}")
         return InjectionContextManager(cls, factory)
+
+    @classmethod
+    def _declared_context(cls, declared: _DeclaredContext) -> InjectionContextManager:
+        """
+        The `Injector.context` path for an `InjectionContextSingletonOverride` class or instance.
+
+        :param declared: the declarations, read from the class or the instance
+        :return: the context manager; its `__enter__` derives the child from the context current then
+        """
+        return InjectionContextManager(cls, lambda: declared.derive(cls._context_registry.current_context))
 
     @classmethod
     def foreign_context(cls, ctx: InjectionContext) -> InjectionContextManager:

@@ -188,6 +188,24 @@ class LazySingleton:
             self._instance = instance
 
     @threadsafe
+    def set_instance(self, instance: Any) -> None:
+        """
+        Gives the singleton its instance without running a constructor, and freezes it.
+
+        Used by `smalldi.context.InjectionContextSingletonOverride` to bind a
+        ready-made object. The singleton is frozen afterwards like one whose
+        instance was requested, so it accepts no override.
+
+        :param instance: the object `get_instance()` returns from now on
+        :raises SingletonFrozenError: if this singleton is frozen, because its instance was requested
+            or set already
+        """
+        if self._frozen:
+            raise SingletonFrozenError(f"Singleton {self._name} was already frozen")
+        self._instance = instance
+        self._frozen = True
+
+    @threadsafe
     def _mark_as_override(self, cls: Type) -> None:
         """
         Marks this singleton as the override of an interface, on behalf of `cls`.

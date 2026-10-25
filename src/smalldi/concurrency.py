@@ -18,44 +18,11 @@ from contextlib import AbstractContextManager
 from enum import Enum, auto
 from typing import Any, Callable
 
+from smalldi.decorator import FunctionPlacement
 
 _INSTANCE_MUTEX_ATTR = "__instance_mutex__"
 _CLASS_MUTEX_ATTR = "__class_mutex__"
 _INSTALL_LOCK = threading.Lock()
-
-
-class _FunctionPlacement(Enum):
-    """
-    Where a function decorated with `@threadsafe` is defined, which determines
-    the lock guarding it.
-    """
-    INSTANCE_LEVEL = auto()
-    CLASS_LEVEL = auto()
-    STATIC_LEVEL = auto()
-
-    @classmethod
-    def from_function(cls, fn: object) -> "_FunctionPlacement | None":
-        """
-        Detects the placement of a function from the object found in the class body.
-        Plain functions are told apart by `__qualname__`: a function defined
-        directly in a class body is an instance method.
-
-        :param fn: function, `staticmethod` or `classmethod` object
-        :return: placement of the function, or None if it isn't defined in a class body
-        """
-        if isinstance(fn, staticmethod):
-            return cls.STATIC_LEVEL
-        if isinstance(fn, classmethod):
-            return cls.CLASS_LEVEL
-        if inspect.isfunction(fn):
-            # Plain function: either a def directly in a class body (instance-level)
-            # or a module-level / nested function that isn't a method at all.
-            parent, _, _ = fn.__qualname__.rpartition(".")
-            if parent and not parent.endswith("<locals>"):
-                return cls.INSTANCE_LEVEL
-            return None
-        return None
-
 
 def _reject_async(fn: Callable, decorator: str) -> None:
     """
@@ -170,7 +137,7 @@ def threadsafe(fn: Any) -> Any:
     :raises NotImplementedError: if `fn` is a coroutine function or an async generator function
     """
     _reject_async(getattr(fn, "__func__", fn), "threadsafe")
-    placement = _FunctionPlacement.from_function(fn)
+    placement = FunctionPlacement.from_function(fn)
 
     if placement is None:
         warnings.warn(
@@ -180,10 +147,10 @@ def threadsafe(fn: Any) -> Any:
         )
         return synchronized(fn)
 
-    if placement is _FunctionPlacement.STATIC_LEVEL:
+    if placement is FunctionPlacement.STATIC_LEVEL:
         return staticmethod(synchronized(fn.__func__))
 
-    if placement is _FunctionPlacement.CLASS_LEVEL:
+    if placement is FunctionPlacement.CLASS_LEVEL:
         func = fn.__func__
 
         @functools.wraps(func)
@@ -193,7 +160,7 @@ def threadsafe(fn: Any) -> Any:
 
         return classmethod(class_wrapper)
 
-    if placement is _FunctionPlacement.INSTANCE_LEVEL:
+    if placement is FunctionPlacement.INSTANCE_LEVEL:
         @functools.wraps(fn)
         def instance_wrapper(self, *args, **kwargs):
             with _get_mutex_for_object(self):

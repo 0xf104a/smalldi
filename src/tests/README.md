@@ -11,6 +11,7 @@ cd src && python -m pytest
 - `test_interface_bindings.py` — specification of interface bindings: implementations, overrides (including conditional overrides), freezing
 - `test_injector_concurrency.py` — specification of threading behaviour: exactly-once construction, races between bindings and injection, deadlocks
 - `test_injector.py` — `Injector` registration, injection and the deprecated `Injector.singletons_available`
+- `test_context_override.py` — specification of `InjectionContextSingletonOverride` and `CopyOf[T]`: plain fields, copies, presets and refusals
 - `test_provide.py` — the `Provide[T]` annotation as seen through `@Injector.inject`
 - `test_container.py` — `Container` and `ComponentRegistration`
 - `test_integration.py` — library-level scenarios with nested injection

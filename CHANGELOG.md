@@ -1,9 +1,18 @@
 # Changelog
 ## Unreleased
 ### Added
+* `smalldi.context.InjectionContextSingletonOverride`, a dataclass base declaring a `SHALLOW` child context field by
+  field. `Injector.context` accepts the subclass, with the fields' defaults as the values, or an instance of it, with
+  its attributes as the values, besides an `InjectionSubcontextType` member as before; `apply(context)` on the class or
+  the instance derives the child of a given context without pushing it. A field `n: T` makes `T` injectable in the block,
+  `n: CopyOf[T]` (the new `smalldi.context.CopyOf` annotation) gives the block its own copy of `T`'s singleton, and a
+  default value becomes the instance of `T`'s singleton, on the shared object or on the copy
+* `LazySingleton.set_instance(instance)`, which binds a ready-made instance and freezes the singleton
 * A documentation site on Read the Docs: `zensical.toml`, `.readthedocs.yaml` and `.github/scripts/stage_docs.py`
   build README.md, `docs/`, CHANGELOG.md, llms.txt and a mkdocstrings API reference with Zensical, styled by the
-  Material 3 stylesheet `docs/assets/material3.css`; the CI docs job builds the site in strict mode
+  Material 3 stylesheet `docs/assets/material3.css`; the CI docs job builds the site in strict mode. The site
+  version `latest` documents the latest release: `.github/scripts/checkout_latest_release.sh` checks out the highest
+  release tag before the build, and the publish workflow triggers the rebuild of `latest` on a release
 
 ### Fixed
 * The README interfaces example exits with status 0 whether or not Ootani is on patrol: Cohee-Neko stops buying when
