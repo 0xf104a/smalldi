@@ -698,6 +698,9 @@ Rules:
 context: every declared class gets a singleton of its own in the block, and a default value becomes that singleton's
 instance.
 
+<details>
+<summary>Stormy and Pip come to visit</summary>
+
 ```python
 import abc
 import dataclasses
@@ -798,6 +801,8 @@ try:
 except TypeError as e:
     print(type(e).__name__)  # TypeError
 ```
+
+</details>
 
 Rules:
 
