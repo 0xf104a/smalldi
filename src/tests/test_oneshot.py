@@ -10,6 +10,7 @@ import dataclasses
 import threading
 import time
 import warnings
+import weakref
 
 import pytest
 
@@ -169,8 +170,15 @@ def test_per_instance_requires_weak_references():
         def weight(self):
             return 1
 
-    with pytest.raises(TypeError):
-        Rock().weight()
+    rock = Rock()
+    try:
+        weakref.ref(rock)
+    except TypeError:
+        with pytest.raises(TypeError):
+            rock.weight()
+    else:
+        # GraalPy gives every object weak references, __slots__ or not
+        assert rock.weight() == 1
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import sys
 from abc import ABC, abstractmethod
 
 import pytest
@@ -17,6 +18,16 @@ from smalldi import (
     singleton,
 )
 from smalldi.context import InjectionSubcontextType
+
+# GraalPy 25 evaluates the annotations of a function defined inside a coroutine to None when the module is
+# compiled by pytest's assertion rewriter; the same code passes without rewriting and on GraalPy 24.2.
+# sys.implementation.version is the GraalPy version on 25 and the Python version (3.x) on 24.2.
+_graalpy_nested_annotation_bug = pytest.mark.xfail(
+    sys.implementation.name == "graalpy" and sys.implementation.version >= (25,),
+    reason="GraalPy 25: annotations of a def nested in a coroutine evaluate to None under pytest assertion rewriting",
+    raises=TypeError,
+    strict=True,
+)
 
 
 def test_singleton_registration(reset_injector):
@@ -410,6 +421,7 @@ def test_inject_async_function_is_coroutine_function():
         assert asyncio.iscoroutinefunction(fn)
 
 
+@_graalpy_nested_annotation_bug
 def test_inject_async_function_resolves_when_coroutine_runs():
     """Dependencies are resolved when the coroutine runs, not when the function is called"""
     async def main():
@@ -455,6 +467,7 @@ def test_inject_async_function_uses_explicit_keyword_argument():
         assert counter == 0
 
 
+@_graalpy_nested_annotation_bug
 def test_inject_async_function_passes_result_and_exception_through():
     """The coroutine's return value and exceptions reach the caller unchanged"""
     async def main():
