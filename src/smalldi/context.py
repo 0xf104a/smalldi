@@ -155,21 +155,30 @@ class InjectionContext:
 
         :return: a new context in which every override of this one is the base
         """
-        def stack(singleton: LazySingleton) -> LazySingleton:
-            effective_cls = singleton.override_cls
-            if effective_cls is None:
-                effective_cls = singleton.implementation_cls
-            return LazySingleton(effective_cls)
-
         new_singletons: dict[type, LazySingleton] = dict()
         stacked_by_id: dict[int, LazySingleton] = dict()
         for key, singleton in self.singletons_available.items():
             stacked_singleton = stacked_by_id.get(id(singleton))
             if stacked_singleton is None:
-                stacked_singleton = stack(singleton)
+                stacked_singleton = self._stacked_singleton(singleton)
                 stacked_by_id[id(singleton)] = stacked_singleton
             new_singletons[key] = stacked_singleton
-        return self.__class__(new_singletons, self.interface_resolver.rewired(stacked_by_id, stack).stacked())
+        return self.__class__(new_singletons,
+                              self.interface_resolver.rewired(stacked_by_id, self._stacked_singleton).stacked())
+
+    @staticmethod
+    def _stacked_singleton(singleton: LazySingleton) -> LazySingleton:
+        """
+        Makes the `STACK` child's singleton for one of this context's: a fresh `LazySingleton` of its effective class.
+
+        :param singleton: a `LazySingleton` of this context, registered or binding-only
+        :return: a new `LazySingleton` of its override class if it has one, else its own class, with no override,
+            no instance and not frozen
+        """
+        effective_cls = singleton.override_cls
+        if effective_cls is None:
+            effective_cls = singleton.implementation_cls
+        return LazySingleton(effective_cls)
 
     def shallow_copied(self) -> 'InjectionContext':
         """

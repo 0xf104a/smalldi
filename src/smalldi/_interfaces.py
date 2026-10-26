@@ -291,22 +291,33 @@ class InterfaceResolver:
         :param derive: makes the derived context's object for a singleton absent from `derived`
         :return: the new resolver
         """
-        def rewire(target: LazySingleton | None) -> LazySingleton | None:
-            if target is None:
-                return None
-            new_target = derived.get(id(target))
-            if new_target is None:
-                new_target = derive(target)
-                derived[id(target)] = new_target
-            return new_target
-
         new_interfaces: dict[type, _LazyInterfaceImpl] = dict()
         for interface, binding in self._interfaces.items():
             new_binding = _LazyInterfaceImpl(interface)
-            new_binding.implementation_singleton = rewire(binding.implementation_singleton)
-            new_binding.override_singleton = rewire(binding.override_singleton)
+            new_binding.implementation_singleton = self._rewire(binding.implementation_singleton, derived, derive)
+            new_binding.override_singleton = self._rewire(binding.override_singleton, derived, derive)
             new_interfaces[interface] = new_binding
         return InterfaceResolver(new_interfaces)
+
+    @staticmethod
+    def _rewire(target: LazySingleton | None, derived: dict[int, LazySingleton],
+                derive: Callable[[LazySingleton], LazySingleton]) -> LazySingleton | None:
+        """
+        Returns the derived context's object for one target of a binding, making it with `derive` if `derived`
+        has none.
+
+        :param target: the `LazySingleton` a binding refers to in the source context, or None for an empty slot
+        :param derived: see `rewired`; extended with the object made for `target` if it had none
+        :param derive: see `rewired`
+        :return: the object the new binding refers to, or None for an empty slot
+        """
+        if target is None:
+            return None
+        new_target = derived.get(id(target))
+        if new_target is None:
+            new_target = derive(target)
+            derived[id(target)] = new_target
+        return new_target
 
     @threadsafe
     def redeclare(self, interface: type, implementation: LazySingleton | None = None) -> None:
