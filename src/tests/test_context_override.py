@@ -13,11 +13,14 @@ classes inside it, so the root context is never touched.
 """
 import abc
 import dataclasses
+import warnings
 
 import pytest
 
 from smalldi import Injector, Provide, SingletonFrozenError
 from smalldi.context import InjectionContext, InjectionContextSingletonOverride
+
+pytestmark = pytest.mark.filterwarnings("ignore:Field .* the default is one object shared:UserWarning")
 
 
 class Bowl:
@@ -545,3 +548,81 @@ def test_refused_interface_field_is_refused_on_every_call():
         for _ in range(2):
             with pytest.raises(TypeError):
                 Injector.context(Fixture)
+
+
+# ---------------------------------------------------------------------------
+# Defaults: the shared-object warning and undecorated subclasses
+# ---------------------------------------------------------------------------
+
+SHARED_MESSAGE = "shared by every context"
+
+
+def test_plain_default_warns_once_per_class():
+    with Injector.context():
+        @dataclasses.dataclass
+        class Fixture(InjectionContextSingletonOverride):
+            bowl: Bowl = Bowl(3)
+
+        with pytest.warns(UserWarning, match=SHARED_MESSAGE):
+            Injector.context(Fixture)
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            Injector.context(Fixture)
+        assert not [w for w in recorded if SHARED_MESSAGE in str(w.message)]
+
+
+def test_default_factory_and_none_default_do_not_warn():
+    with Injector.context():
+        @Injector.singleton
+        class Jar:
+            pass
+
+        @dataclasses.dataclass
+        class Fixture(InjectionContextSingletonOverride):
+            bowl: Bowl = dataclasses.field(default_factory=Bowl)
+            jar: Jar | None = None
+
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            with Injector.context(Fixture):
+                assert Injector.get_instance(Bowl).snacks == 0
+        assert not [w for w in recorded if SHARED_MESSAGE in str(w.message)]
+
+
+def test_shared_default_is_one_object_across_contexts():
+    with Injector.context():
+        @dataclasses.dataclass
+        class Fixture(InjectionContextSingletonOverride):
+            bowl: Bowl = Bowl(3)
+
+        with Injector.context(Fixture):
+            first = Injector.get_instance(Bowl)
+        with Injector.context(Fixture):
+            second = Injector.get_instance(Bowl)
+        assert first is second
+        assert first.snacks == 3
+
+
+def test_undecorated_subclass_of_dataclass_fixture_is_refused():
+    with Injector.context():
+        @dataclasses.dataclass
+        class Fixture(InjectionContextSingletonOverride):
+            bowl: Bowl = dataclasses.field(default_factory=lambda: Bowl(6))
+
+        class Child(Fixture):
+            pass
+
+        with pytest.raises(TypeError):
+            Injector.context(Child)
+        with pytest.raises(TypeError):
+            Child.apply(Injector.get_context())
+        with pytest.raises(TypeError):
+            Injector.context(Child())
+        assert not Injector.is_singleton(Bowl)
+
+        @dataclasses.dataclass
+        class Decorated(Fixture):
+            pass
+
+        with Injector.context(Decorated):
+            assert Injector.get_instance(Bowl).snacks == 6

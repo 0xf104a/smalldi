@@ -1,12 +1,22 @@
 # Changelog
-## Unreleased
+## 0.5.0
 ### Added
 * `smalldi.context.InjectionContextSingletonOverride`, a dataclass base declaring a `SHALLOW` child context field by
   field. `Injector.context` accepts the subclass, with the fields' defaults as the values, or an instance of it, with
   its attributes as the values, besides an `InjectionSubcontextType` member as before; `apply(context)` on the class or
   the instance derives the child of a given context without pushing it. A field `n: T` gives the block a singleton of
   its own for `T`: a clone of the singleton of a registered `T`, or a registration in the block only for an
-  unregistered `T`; a default value becomes that singleton's instance. A field may not declare an abstract class
+  unregistered `T`; a default value becomes that singleton's instance. A field may not declare an abstract class. A
+  default that is a plain value other than None is one object preset in every context derived from the class, which
+  warns with `UserWarning` once per class; `dataclasses.field(default_factory=...)` makes a new one per context. A
+  subclass of a decorated subclass must be decorated with `@dataclasses.dataclass` itself, else `TypeError`
+* `smalldi.decorator.oneshot` and `smalldi.decorator.OneshotLevel`: `@oneshot` marks a function to run once, every
+  later call returning the first result. `OneshotLevel.GLOBAL`, the level of the bare `@oneshot` and of `@oneshot()`,
+  runs it once everywhere; `@oneshot(OneshotLevel.PER_CLASS)` once per class, the `cls` of a classmethod or
+  `type(self)` of an instance method; `@oneshot(OneshotLevel.PER_INSTANCE)` once per instance, on instance methods
+  only. On a classmethod or a staticmethod `@oneshot` goes above `@classmethod` / `@staticmethod`. A call that raises
+  stores nothing, a re-entrant call for the same key while the first call runs raises `RuntimeError`, and concurrent
+  first calls run the function once, the other callers waiting for its result
 * `LazySingleton.set_instance(instance)`, which binds a ready-made instance and freezes the singleton
 * A documentation site on Read the Docs: `zensical.toml`, `.readthedocs.yaml` and `.github/scripts/stage_docs.py`
   build README.md, `docs/`, CHANGELOG.md, llms.txt and a mkdocstrings API reference with Zensical, styled by the

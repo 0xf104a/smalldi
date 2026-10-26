@@ -17,7 +17,8 @@ The package lives in `src/smalldi/`, the tests in `src/tests/`.
 - `src/smalldi/container.py`: `Container`, a singleton base class collecting components registered with `@MyContainer.component`, and `ComponentRegistration`.
 - `src/smalldi/collector.py`: `Collector.collect_from_package`, which imports every module of a package so its decorators run.
 - `src/smalldi/concurrency.py`: `@synchronized`, `@threadsafe` and the `mutex` decorator factory, the reentrant-lock helpers used throughout the package.
-- `src/smalldi/decorator.py`: `staticclass`, which makes a class uninstantiable.
+- `src/smalldi/decorator.py`: `staticclass`, which makes a class uninstantiable, and `oneshot` with `OneshotLevel`, which runs a function once per level (`GLOBAL`, `PER_CLASS`, `PER_INSTANCE`) and returns the first result afterwards.
+- `src/smalldi/_placement.py`: `FunctionPlacement`, which tells an instance method, a classmethod and a staticmethod apart from the object found in a class body, for `@threadsafe` and `@oneshot`.
 - `src/smalldi/atomic.py`: `AtomicSet`, a lock-guarded set used by `LazySingleton` to track the threads inside a constructor.
 - `src/smalldi/wrappers.py`: compatibility alias re-exporting `staticclass` from `smalldi.decorator`.
 - `src/smalldi/py.typed`: marker that the package is typed.

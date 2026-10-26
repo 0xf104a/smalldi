@@ -738,7 +738,8 @@ snack_time("Pusheen")  # Pusheen takes a cookie (2 left) and naps on the sofa
 class StormyVisits(InjectionContextSingletonOverride):
     jar: CookieJar                              # the block's own jar, built on first use: full again
     bowl: SnackBowl                             # not registered outside: injectable in the block only
-    spot: NapSpot = NapSpot("the windowsill")   # the block's own NapSpot, with this instance
+    spot: NapSpot = dataclasses.field(                  # the block's own NapSpot, with a new instance per visit
+        default_factory=lambda: NapSpot("the windowsill"))
 
 
 with Injector.context(StormyVisits):
@@ -763,7 +764,7 @@ class Blanket:
 # Pip's blanket is the block's own Blanket; the one outside stays grey.
 @dataclasses.dataclass
 class PipBringsABlanket(InjectionContextSingletonOverride):
-    blanket: Blanket = Blanket("pink")
+    blanket: Blanket = dataclasses.field(default_factory=lambda: Blanket("pink"))
 
 
 with Injector.context(PipBringsABlanket):
@@ -802,8 +803,8 @@ Rules:
   takes the fields' defaults as the values; the instance form, `Injector.context(Fixture(...))`, takes the instance's
   attributes, and a value of None presets nothing. `Fixture.apply(context)`, on the class or an instance, derives the
   same child from a given `InjectionContext` and returns it without pushing it. Fields without a default go first, as
-  in every dataclass. A subclass without the decorator works in the class form, through its annotations and class
-  attributes.
+  in every dataclass. A subclass with no dataclass among its bases works in the class form, through its annotations
+  and class attributes; a subclass of a decorated subclass must be decorated itself, else `TypeError`.
 * The child is the `SHALLOW` kind: every singleton not declared is the parent's own `LazySingleton` object.
 * `name: T` gives the child a `LazySingleton` of its own for `T`. For a registered `T` it is a clone of `T`'s
   singleton, made as `RESET` makes it: same class and override class, no instance, not frozen. Instances created and
@@ -814,6 +815,10 @@ Rules:
   class implementing it; the parent's interfaces stay bound in the child.
 * `name: T = instance`, or `dataclasses.field(default_factory=...)`, makes `instance` the instance of the child's
   singleton for `T` and freezes it. The parent never sees it. `instance` is not checked against `T`.
+* A plain default value is one object, preset in every context derived from the class: the class form uses it, and
+  so does every instance built without that argument. `Injector.context()` and `apply()` warn about it with
+  `UserWarning` once per class, on first use, and use it as it is. A `default_factory` makes a new object per
+  context and doesn't warn; neither does a default of None.
 * A default factory runs once per `Injector.context()` or `apply()` call in the class form, and never in the
   instance form, where the dataclass constructor ran it already. Two fields of one type, a `Provide[T]` field, an
   abstract class or an annotation that is not a class raise `TypeError` from `Injector.context()` or `apply()`. The

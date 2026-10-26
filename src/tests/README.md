@@ -16,6 +16,7 @@ cd src && python -m pytest
 - `test_container.py` — `Container` and `ComponentRegistration`
 - `test_integration.py` — library-level scenarios with nested injection
 - `test_concurrency.py` — `@synchronized` and `@threadsafe` from `smalldi.concurrency`
+- `test_oneshot.py` — `@oneshot` and `OneshotLevel` from `smalldi.decorator`: the three levels, refusals, failures, re-entrance and concurrent first calls
 - `test_wrappers.py` — `staticclass`
 
 The three specification files (`test_override_rules.py`, `test_interface_bindings.py`,

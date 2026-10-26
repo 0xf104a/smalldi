@@ -17,7 +17,7 @@ import warnings
 from contextlib import AbstractContextManager
 from typing import Any, Callable
 
-from smalldi.decorator import FunctionPlacement
+from smalldi._placement import FunctionPlacement
 
 _INSTANCE_MUTEX_ATTR = "__instance_mutex__"
 _CLASS_MUTEX_ATTR = "__class_mutex__"

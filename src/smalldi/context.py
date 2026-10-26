@@ -14,6 +14,7 @@ import dataclasses
 import enum
 import functools
 import types
+import warnings
 from contextlib import AbstractContextManager
 from inspect import isabstract
 from typing import (Annotated, Any, Callable, ClassVar, TYPE_CHECKING, Union, cast,
@@ -366,9 +367,19 @@ class InjectionContextSingletonOverride:
     `T`. The field types are read once per class; the values once per
     `Injector.context(...)` call, when a default factory runs too. The checks
     run at `__enter__`, against the context current then; the parent is
-    never changed. `Provide[T]` has no meaning here and is rejected. A
-    subclass without the dataclass decorator works through its annotations
-    and class attributes, in the class form.
+    never changed. `Provide[T]` has no meaning here and is rejected.
+
+    A default that is a plain value other than None is one object, preset in
+    every context derived from the class: the class form uses it, and so does
+    every instance built without that argument. That warns with
+    `UserWarning` once per class, on first use, and the value is used as it
+    is; `dataclasses.field(default_factory=...)` makes a new one per context.
+
+    A subclass with no dataclass among its bases works through its
+    annotations and class attributes, in the class form. A subclass of a
+    decorated subclass must be decorated with `@dataclasses.dataclass`
+    itself, else `TypeError`: without the decorator its inherited fields
+    would read as plain class attributes.
     """
 
     @_hybridmethod
@@ -383,8 +394,9 @@ class InjectionContextSingletonOverride:
 
         :param context: the context to derive the child from
         :return: the child context, not pushed
-        :raises TypeError: if a field's annotation is `Provide[T]`, isn't a class or is an abstract
-            class, two fields declare one class, or two fields resolve to one singleton
+        :raises TypeError: if the class inherits dataclass fields without being decorated with
+            `@dataclasses.dataclass` itself, a field's annotation is `Provide[T]`, isn't a class or is
+            an abstract class, two fields declare one class, or two fields resolve to one singleton
         """
         if isinstance(self_or_cls, type):
             declared = self_or_cls._from_class()
@@ -423,24 +435,38 @@ class InjectionContextSingletonOverride:
         of the same name as the default. Annotations are resolved with
         `typing.get_type_hints`, so string annotations work.
 
+        A default that is a plain value other than None is one object, preset
+        in every context derived from the class; it warns with `UserWarning`,
+        once per class, and is used as it is.
+
         :return: the fields, in declaration order
-        :raises TypeError: if a field's annotation is `Provide[T]`, isn't a class or is an abstract
-            class, or two fields declare one class
+        :raises TypeError: if the class inherits dataclass fields without being decorated with
+            `@dataclasses.dataclass` itself, a field's annotation is `Provide[T]`, isn't a class or is
+            an abstract class, or two fields declare one class
         """
+        if dataclasses.is_dataclass(cls) and "__dataclass_fields__" not in cls.__dict__:
+            raise TypeError(f"{cls.__name__} inherits dataclass fields but isn't decorated with @dataclasses.dataclass; "
+                            f"decorate it")
         hints = get_type_hints(cls, include_extras=True)
         sources: list[tuple[str, Callable[[], Any]]] = []
+        shared: list[str] = []
         if "__dataclass_fields__" in cls.__dict__:
             for field in dataclasses.fields(cast(Any, cls)):
                 if field.default_factory is not dataclasses.MISSING:
                     sources.append((field.name, field.default_factory))
                 else:
                     default = None if field.default is dataclasses.MISSING else field.default
+                    if default is not None:
+                        shared.append(field.name)
                     sources.append((field.name, functools.partial(_identity, default)))
         else:
             for name, hint in hints.items():
                 if hint is ClassVar or get_origin(hint) is ClassVar:
                     continue
-                sources.append((name, functools.partial(_identity, getattr(cls, name, None))))
+                default = getattr(cls, name, None)
+                if default is not None:
+                    shared.append(name)
+                sources.append((name, functools.partial(_identity, default)))
         fields: list[_Field] = []
         seen: dict[type, str] = dict()
         for name, default in sources:
@@ -452,6 +478,10 @@ class InjectionContextSingletonOverride:
                 raise TypeError(f"Fields {seen[tp]!r} and {name!r} both declare {tp.__name__}")
             seen[tp] = name
             fields.append(_Field(name, tp, default))
+        for name in shared:
+            warnings.warn(f"Field {name!r} of {cls.__name__}: the default is one object shared by every context; "
+                          f"use dataclasses.field(default_factory=...) for a new one per context",
+                          UserWarning, stacklevel=2)
         return tuple(fields)
 
     @staticmethod

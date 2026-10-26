@@ -213,6 +213,12 @@ flowchart LR
 | `n: T`                  | The child's own `LazySingleton` for `T`: a registered `T` is cloned as `RESET` clones it, and keys that shared `T`'s object share the clone; an unregistered `T` is registered in the child only. `T` is a concrete class: an abstract one, registered as an interface or not, raises `TypeError` when the manager is created. |
 | `n: T = instance`       | The child's singleton for `T` gets `instance` and is frozen. The parent never sees it.                                                            |
 
+A plain default value is one object, preset in every context derived from the class, in the class form and in every
+instance built without that argument; `Injector.context` and `apply` warn about it with `UserWarning` once per class,
+on first use, and use it as it is. `dataclasses.field(default_factory=...)` makes a new object per context and
+doesn't warn, nor does a default of None. A subclass of a decorated subclass must carry `@dataclasses.dataclass`
+itself; without it, `TypeError`.
+
 `Injector.context` dispatches on its argument: a member of `InjectionSubcontextType` takes the kind path, with `RESET` as
 the default; a subclass of `InjectionContextSingletonOverride` and an instance of one take
 the declared path, reading the fields' defaults or the instance's attributes when the manager is created. Default
@@ -229,7 +235,7 @@ flowchart LR
     end
     subgraph child["child of Injector.context(StormyVisits)"]
         cJar["key CookieJar"] --> LS1c["LazySingleton CookieJar<br/>clone: no instance, not frozen"]
-        cBlanket["key Blanket (default)"] --> LS2c["LazySingleton Blanket<br/>frozen, instance = pink"]
+        cBlanket["key Blanket (default_factory)"] --> LS2c["LazySingleton Blanket<br/>frozen, instance = Blanket('pink')"]
         cBowl["key SnackBowl (child only)"] --> LS3["LazySingleton SnackBowl"]
     end
     LS1 -. "clone()" .-> LS1c
@@ -249,26 +255,25 @@ with Injector.context():
 
     @Injector.singleton
     class Blanket:
-        pass
+        def __init__(self, colour="grey"):
+            self.colour = colour
 
     class SnackBowl:
         pass
-
-    pink = Blanket()
 
     @dataclasses.dataclass
     class StormyVisits(InjectionContextSingletonOverride):
         jar: CookieJar
         bowl: SnackBowl
-        blanket: Blanket = pink
+        blanket: Blanket = dataclasses.field(default_factory=lambda: Blanket("pink"))
 
     outer_jar = Injector.get_instance(CookieJar)
     with Injector.context(StormyVisits):
         print(Injector.get_instance(CookieJar) is outer_jar)   # False: the block's own singleton
-        print(Injector.get_instance(Blanket) is pink)          # True
+        print(Injector.get_instance(Blanket).colour)           # pink
         print(Injector.is_singleton(SnackBowl))                # True
     print(Injector.get_instance(CookieJar) is outer_jar)       # True
-    print(Injector.get_instance(Blanket) is pink)              # False: the parent's Blanket is its own
+    print(Injector.get_instance(Blanket).colour)               # grey: the parent's Blanket is its own
     print(Injector.is_singleton(SnackBowl))                    # False
 ```
 
