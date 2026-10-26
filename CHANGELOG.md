@@ -4,9 +4,9 @@
 * `smalldi.context.InjectionContextSingletonOverride`, a dataclass base declaring a `SHALLOW` child context field by
   field. `Injector.context` accepts the subclass, with the fields' defaults as the values, or an instance of it, with
   its attributes as the values, besides an `InjectionSubcontextType` member as before; `apply(context)` on the class or
-  the instance derives the child of a given context without pushing it. A field `n: T` makes `T` injectable in the block,
-  `n: CopyOf[T]` (the new `smalldi.context.CopyOf` annotation) gives the block its own copy of `T`'s singleton, and a
-  default value becomes the instance of `T`'s singleton, on the shared object or on the copy
+  the instance derives the child of a given context without pushing it. A field `n: T` gives the block a singleton of
+  its own for `T`: a clone of the singleton of a registered `T`, or a registration in the block only for an
+  unregistered `T`; a default value becomes that singleton's instance. A field may not declare an abstract class
 * `LazySingleton.set_instance(instance)`, which binds a ready-made instance and freezes the singleton
 * A documentation site on Read the Docs: `zensical.toml`, `.readthedocs.yaml` and `.github/scripts/stage_docs.py`
   build README.md, `docs/`, CHANGELOG.md, llms.txt and a mkdocstrings API reference with Zensical, styled by the

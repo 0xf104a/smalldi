@@ -19,7 +19,7 @@ from inspect import isabstract
 from typing import (Annotated, Any, Callable, ClassVar, TYPE_CHECKING, Union, cast,
                     get_args, get_origin, get_type_hints)
 
-from smalldi._singleton import LazySingleton, SingletonFrozenError
+from smalldi._singleton import LazySingleton
 from smalldi._interfaces import InterfaceResolver
 from smalldi.annotation import _Provide
 from smalldi.decorator import oneshot, OneshotLevel
@@ -249,7 +249,7 @@ class _Declaration:
     One field of an `InjectionContextSingletonOverride` with its value for one `Injector.context(...)` call.
 
     :ivar name: the field name, for error messages
-    :ivar tp: the declared singleton or interface
+    :ivar tp: the declared class
     :ivar instance: the value to preset, or None to preset nothing
     """
     def __init__(self, field: _Field, instance: Any):
@@ -273,29 +273,6 @@ class _DeclaredContext:
     def __init__(self, declarations: list[_Declaration]):
         self.declarations = declarations
 
-    @staticmethod
-    def _target_of(parent: InjectionContext, d: _Declaration) -> tuple[bool, LazySingleton | None]:
-        """
-        Finds the `LazySingleton` a declared class resolves to in the parent, without freezing anything.
-
-        :param parent: the context the child is derived from
-        :param d: the declaration
-        :return: `(registered, target)`: `target` is the singleton of `d.tp`, or the one its interface
-            binding resolves to, and None if `d.tp` isn't registered or is an interface without a binding
-        :raises TypeError: if `d` presets an interface that has no implementation
-        """
-        singletons = parent.singletons_available
-        if d.tp in singletons:
-            return True, singletons[d.tp]
-        resolver = parent.interface_resolver
-        if not resolver.is_interface(d.tp):
-            return False, None
-        binding = resolver.get_binding(d.tp)
-        target = binding.override_singleton or binding.implementation_singleton
-        if target is None and d.has_instance:
-            raise TypeError(f"Field {d.name!r}: interface {d.tp.__name__} has no implementation to work on")
-        return True, target
-
     def derive(self, parent: InjectionContext) -> InjectionContext:
         """
         Derives the `SHALLOW` child of `parent` with the declared singletons of its own.
@@ -305,32 +282,19 @@ class _DeclaredContext:
 
         :param parent: the context to derive the child from
         :return: the child context, not pushed
-        :raises TypeError: if two fields resolve to one singleton, or a preset interface has no
-            implementation
+        :raises TypeError: if two fields resolve to one singleton
         """
         singletons = copy.copy(parent.singletons_available)
         clones: dict[int, LazySingleton] = dict()
         claimed: dict[int, str] = dict()
-        new_interfaces: list[tuple[type, LazySingleton | None]] = []
         for d in self.declarations:
-            registered, target = self._target_of(parent, d)
-            if not registered:
-                if not isabstract(d.tp):
-                    fresh = LazySingleton(d.tp)
-                    if d.has_instance:
-                        fresh.set_instance(d.instance)
-                    singletons[d.tp] = fresh
-                elif d.has_instance:
-                    # The instance's class implements the new interface, so the binding survives rewiring.
-                    fresh = LazySingleton(type(d.instance))
-                    fresh.set_instance(d.instance)
-                    singletons.setdefault(type(d.instance), fresh)
-                    new_interfaces.append((d.tp, fresh))
-                else:
-                    new_interfaces.append((d.tp, None))
-                continue
+            target = parent.singletons_available.get(d.tp)
             if target is None:
-                continue  # an interface without a binding: nothing to give the child
+                fresh = LazySingleton(d.tp)
+                if d.has_instance:
+                    fresh.set_instance(d.instance)
+                singletons[d.tp] = fresh
+                continue
             other = claimed.get(id(target))
             if other is not None:
                 raise TypeError(f"Fields {other!r} and {d.name!r} resolve to one singleton; declare it once")
@@ -343,12 +307,7 @@ class _DeclaredContext:
             cloned = clones.get(id(registered_singleton))
             if cloned is not None:
                 singletons[key] = cloned
-        resolver = parent.interface_resolver.rewired(singletons)
-        for tp, implementation in new_interfaces:
-            resolver.register(tp)
-            if implementation is not None:
-                resolver.get_binding(tp).implement(implementation)
-        return InjectionContext(singletons, resolver)
+        return InjectionContext(singletons, parent.interface_resolver.rewired(singletons))
 
 
 class _hybridmethod:
@@ -392,10 +351,13 @@ class InjectionContextSingletonOverride:
       kind makes it: same class and override class, no instance, not frozen.
       Instances created and overrides declared for `T` in the block stay in
       the block. Classes sharing that singleton with `T` share the clone;
-      for an interface, the singleton it resolves to is cloned and the
-      child's bindings refer to the clone;
-    * an unregistered `T` is registered in the child only, as an interface
-      if it is abstract and as a singleton otherwise.
+    * an unregistered `T` is registered in the child only.
+
+    `T` is a concrete class: an abstract class, registered as an interface
+    or not, is refused as a field with `TypeError`. The implementation of an
+    interface is preset through the concrete singleton class implementing
+    it. The parent's interfaces stay bound in the child, to the clones where
+    their singletons are declared.
 
     `n: T = instance` gives the child's singleton `instance` and freezes it;
     the parent never sees it. A value of None presets nothing, so None
@@ -421,8 +383,8 @@ class InjectionContextSingletonOverride:
 
         :param context: the context to derive the child from
         :return: the child context, not pushed
-        :raises TypeError: if a field's annotation is `Provide[T]` or isn't a class, two fields declare
-            one class, two fields resolve to one singleton, or a preset interface has no implementation
+        :raises TypeError: if a field's annotation is `Provide[T]`, isn't a class or is an abstract
+            class, two fields declare one class, or two fields resolve to one singleton
         """
         if isinstance(self_or_cls, type):
             declared = self_or_cls._from_class()
@@ -462,8 +424,8 @@ class InjectionContextSingletonOverride:
         `typing.get_type_hints`, so string annotations work.
 
         :return: the fields, in declaration order
-        :raises TypeError: if a field's annotation is `Provide[T]` or isn't a class, or two fields
-            declare one class
+        :raises TypeError: if a field's annotation is `Provide[T]`, isn't a class or is an abstract
+            class, or two fields declare one class
         """
         hints = get_type_hints(cls, include_extras=True)
         sources: list[tuple[str, Callable[[], Any]]] = []
@@ -483,6 +445,9 @@ class InjectionContextSingletonOverride:
         seen: dict[type, str] = dict()
         for name, default in sources:
             tp = cls._unwrap(name, hints[name])
+            if isabstract(tp):
+                raise TypeError(f"Field {name!r}: {tp.__name__} is abstract; an InjectionContextSingletonOverride "
+                                f"can't declare interfaces, declare the implementing singleton instead")
             if tp in seen:
                 raise TypeError(f"Fields {seen[tp]!r} and {name!r} both declare {tp.__name__}")
             seen[tp] = name

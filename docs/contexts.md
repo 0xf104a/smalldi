@@ -210,30 +210,27 @@ flowchart LR
 
 | Field                   | Effect on the child                                                                                                                              |
 |-------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| `n: T`                  | `T` is injectable: an unregistered `T` is registered in the child only (interface if abstract, singleton otherwise); a registered one is left as it is. |
-| `n: CopyOf[T]`          | The child's own `LazySingleton` for `T`, cloned as `RESET` clones it. Keys that shared `T`'s object share the copy; an interface's binding is rebound to the copy of the singleton it resolves to. |
-| `n: T = instance`       | `T`'s singleton gets `instance` and is frozen. Registered `T`: the shared object, so the parent sees it; frozen: `SingletonFrozenError`. Unregistered `T`: registered in the child only, with `instance`. |
-| `n: CopyOf[T] = inst`   | The copy gets `inst`: the preset is scoped to the block.                                                                                           |
+| `n: T`                  | The child's own `LazySingleton` for `T`: a registered `T` is cloned as `RESET` clones it, and keys that shared `T`'s object share the clone; an unregistered `T` is registered in the child only. `T` is a concrete class: an abstract one, registered as an interface or not, raises `TypeError` when the manager is created. |
+| `n: T = instance`       | The child's singleton for `T` gets `instance` and is frozen. The parent never sees it.                                                            |
 
 `Injector.context` dispatches on its argument: a member of `InjectionSubcontextType` takes the kind path, with `RESET` as
 the default; a subclass of `InjectionContextSingletonOverride` and an instance of one take
 the declared path, reading the fields' defaults or the instance's attributes when the manager is created. Default
-factories run then, before any lock is taken, in the class form only. The checks run at `__enter__`, under the injector's class
-mutex, against the context current then and before anything changes; the child's dict is private until it is pushed,
-and the shared objects are touched only after every field passed.
+factories run then, before any lock is taken, in the class form only. The child is built at `__enter__`, under the
+injector's class mutex, from the context current then; the parent's dict and `LazySingleton` objects are only read,
+and the child's dict is private until it is pushed. The parent's interfaces are rebound in the child to the clones
+where their singletons are declared.
 
 ```mermaid
 flowchart LR
     subgraph parent["parent"]
         pJar["key CookieJar"] --> LS1["LazySingleton CookieJar<br/>frozen, has instance"]
-        pSpot["key NapSpot"] --> LS2["LazySingleton NapSpot"]
-        pBlanket["key Blanket"] --> LS3["LazySingleton Blanket<br/>frozen, instance = Blanket('pink')"]
+        pBlanket["key Blanket"] --> LS2["LazySingleton Blanket"]
     end
     subgraph child["child of Injector.context(StormyVisits)"]
-        cJar["key CookieJar (CopyOf)"] --> LS1c["LazySingleton CookieJar<br/>clone: no instance, not frozen"]
-        cSpot["key NapSpot (CopyOf, default)"] --> LS2c["LazySingleton NapSpot<br/>frozen, instance = NapSpot('the windowsill')"]
-        cBlanket["key Blanket"] --> LS3
-        cBowl["key SnackBowl (child only)"] --> LS4["LazySingleton SnackBowl"]
+        cJar["key CookieJar"] --> LS1c["LazySingleton CookieJar<br/>clone: no instance, not frozen"]
+        cBlanket["key Blanket (default)"] --> LS2c["LazySingleton Blanket<br/>frozen, instance = pink"]
+        cBowl["key SnackBowl (child only)"] --> LS3["LazySingleton SnackBowl"]
     end
     LS1 -. "clone()" .-> LS1c
     LS2 -. "clone(), set_instance()" .-> LS2c
@@ -243,7 +240,7 @@ flowchart LR
 import dataclasses
 
 from smalldi import Injector
-from smalldi.context import InjectionContextSingletonOverride, CopyOf
+from smalldi.context import InjectionContextSingletonOverride
 
 with Injector.context():
     @Injector.singleton
@@ -261,17 +258,17 @@ with Injector.context():
 
     @dataclasses.dataclass
     class StormyVisits(InjectionContextSingletonOverride):
-        jar: CopyOf[CookieJar]
+        jar: CookieJar
         bowl: SnackBowl
         blanket: Blanket = pink
 
     outer_jar = Injector.get_instance(CookieJar)
     with Injector.context(StormyVisits):
-        print(Injector.get_instance(CookieJar) is outer_jar)   # False: the block's own copy
+        print(Injector.get_instance(CookieJar) is outer_jar)   # False: the block's own singleton
         print(Injector.get_instance(Blanket) is pink)          # True
         print(Injector.is_singleton(SnackBowl))                # True
     print(Injector.get_instance(CookieJar) is outer_jar)       # True
-    print(Injector.get_instance(Blanket) is pink)              # True: the shared singleton kept it
+    print(Injector.get_instance(Blanket) is pink)              # False: the parent's Blanket is its own
     print(Injector.is_singleton(SnackBowl))                    # False
 ```
 
