@@ -3,7 +3,7 @@ Interfaces and their bindings to the singletons implementing or overriding them,
 """
 import threading
 from inspect import isabstract
-from typing import Any, Type
+from typing import Any, Callable, Type
 
 from smalldi._singleton import LazySingleton, SingletonFrozenError
 from smalldi.concurrency import threadsafe
@@ -153,6 +153,12 @@ class _LazyInterfaceImpl:
         self._frozen = True
 
     def stacked(self) -> '_LazyInterfaceImpl':
+        """
+        Returns a new, unfrozen binding whose implementation is this binding's override, or its implementation if it
+        has no override, and which has no override.
+
+        :return: the new binding, referring to the same `LazySingleton` object
+        """
         new_instance = self.__class__(self.interface)
         my_impl = None
         if self.override_singleton is not None:
@@ -265,32 +271,41 @@ class InterfaceResolver:
             binding.rebind(old, new)
 
     @threadsafe
-    def rewired(self, new_singletons: dict[type, LazySingleton]) -> 'InterfaceResolver':
+    def rewired(self, derived: dict[int, LazySingleton],
+                derive: Callable[[LazySingleton], LazySingleton]) -> 'InterfaceResolver':
         """
-        Returns a new resolver with a new, unfrozen binding per interface, referring to `new_singletons`.
+        Returns a new resolver with a new, unfrozen binding per interface, referring to the derived singletons.
 
-        Each binding's implementation and override are looked up in
-        `new_singletons` by the registered class of the singleton they refer to
-        here, so a binding follows the clone of its singleton; a class absent
-        from `new_singletons` leaves that slot None.
+        Each binding's implementation and override are looked up in `derived`
+        by the `id` of the `LazySingleton` they refer to here, so a binding
+        follows the object the context being derived holds for its singleton.
+        A target absent from `derived`, a binding-only singleton holding the
+        preset of an `ImplementationOf[I]` field, is passed to `derive`, the
+        transform the derivation applies to its registry singletons, and the
+        result is stored in `derived`; so targets that are one object here are
+        one object in the new resolver, and `derived` is extended with the
+        objects made for such targets.
 
-        :param new_singletons: the registry dict of the context being derived
+        :param derived: `id` of each singleton of the source context mapped to the object the derived context holds
+            for it; extended with the objects made for targets absent from it
+        :param derive: makes the derived context's object for a singleton absent from `derived`
         :return: the new resolver
         """
+        def rewire(target: LazySingleton | None) -> LazySingleton | None:
+            if target is None:
+                return None
+            new_target = derived.get(id(target))
+            if new_target is None:
+                new_target = derive(target)
+                derived[id(target)] = new_target
+            return new_target
+
         new_interfaces: dict[type, _LazyInterfaceImpl] = dict()
-        for interface, target in self._interfaces.items():
-            new_target = _LazyInterfaceImpl(interface)
-            if target.implementation_singleton is not None:
-                if target.implementation_singleton.implementation_cls is not None:
-                    new_target.implementation_singleton = (new_singletons
-                                                           .get(target.implementation_singleton.implementation_cls,
-                                                                None))
-            if target.override_singleton is not None:
-                if target.override_singleton.implementation_cls is not None:
-                    new_target.override_singleton = (new_singletons
-                                                      .get(target.override_singleton.implementation_cls,
-                                                           None))
-            new_interfaces[interface] = new_target
+        for interface, binding in self._interfaces.items():
+            new_binding = _LazyInterfaceImpl(interface)
+            new_binding.implementation_singleton = rewire(binding.implementation_singleton)
+            new_binding.override_singleton = rewire(binding.override_singleton)
+            new_interfaces[interface] = new_binding
         return InterfaceResolver(new_interfaces)
 
     @threadsafe
@@ -303,13 +318,13 @@ class InterfaceResolver:
         field, after `rewired()`. Without `implementation` the binding has
         neither implementation nor override, so the block binds it with
         `@Injector.implements` or `@Injector.override`. With `implementation`,
-        a `LazySingleton` owned by the child's registry dict which already
-        holds the preset instance, the binding gets it as its implementation
-        and is frozen. The implementation is not checked against `interface`.
-        The binding is built completely before it is stored.
+        a binding-only `LazySingleton` which already holds the preset instance
+        and is referenced by nothing but this binding, the binding gets it as
+        its implementation and is frozen. The caller checks the preset against
+        `interface`. The binding is built completely before it is stored.
 
         :param interface: abstract class to bind
-        :param implementation: the child's `LazySingleton` holding the preset, or None for an unbound binding
+        :param implementation: the binding-only `LazySingleton` holding the preset, or None for an unbound binding
         :raises TypeError: if `interface` isn't abstract
         """
         binding = _LazyInterfaceImpl(interface)
@@ -320,6 +335,15 @@ class InterfaceResolver:
 
     @threadsafe
     def stacked(self) -> 'InterfaceResolver':
+        """
+        Returns a new resolver in which every binding's override, or its implementation if it has none, is the
+        implementation of a new, unfrozen binding without an override.
+
+        Called on the resolver `rewired()` built for a `STACK` child, whose
+        bindings already refer to the fresh singletons of that child.
+
+        :return: the new resolver
+        """
         new_interfaces: dict[type, _LazyInterfaceImpl] = dict()
         for interface, target in self._interfaces.items():
             new_interfaces[interface] = target.stacked()

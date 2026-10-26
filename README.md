@@ -814,7 +814,7 @@ class PipBringsAToy(InjectionContextOverride):
 
 with Injector.context(PipBringsAToy):
     play("Pip")  # Pip plays with the feather: swish
-    print(Injector.get_instance(Toy) is Injector.get_instance(Feather))  # True
+    print(Injector.is_singleton(Feather))  # False: the feather is held by the block's binding of Toy alone
 play("Pusheen")  # Pusheen plays with the ball: boing
 
 
@@ -872,10 +872,13 @@ Rules:
   declared as a field. A request for `I` before it is bound raises `RuntimeError` and freezes the block's binding. An
   `I` the parent doesn't know is registered in the child only. `ImplementationOf[I] | None`,
   `Optional[ImplementationOf[I]]` and `ImplementationOf[I | None]` declare `I` as well.
-* `name: ImplementationOf[I] = instance`, or `dataclasses.field(default_factory=...)`, registers the child's own
-  singleton for `type(instance)` exactly as `name: type(instance) = instance` would, then binds it as the
-  implementation of `I` and freezes the binding: `Provide[I]` and `Provide[type(instance)]` are one object in the
-  block. `instance` is not checked against `I`.
+* `name: ImplementationOf[I] = instance`, or `dataclasses.field(default_factory=...)`, binds `instance` as the
+  implementation of `I` and freezes the binding: `Provide[I]` is `instance` in the block, and the binding accepts no
+  override. The instance is held by a singleton of the binding alone: `type(instance)` is not registered by the
+  preset, so `Provide[type(instance)]` resolves as in the parent, and several interface fields may hold instances of
+  one class, or one object, as may a concrete field and an interface field. `instance` must be an instance of `I`,
+  else `TypeError` from `Injector.context()` or `apply()`; a mock built with `spec=I` passes, a class object or a
+  bare mock doesn't.
 * The parent's binding for `I` is never changed, and the parent's other interfaces stay bound in the child, to the
   clones where their singletons are declared. The child is `SHALLOW`, so overriding the block's `I` with an inherited,
   undeclared singleton marks that shared object, and a request through the binding freezes it, as in any `SHALLOW`
@@ -892,11 +895,11 @@ Rules:
 * A default factory runs once per `Injector.context()` or `apply()` call in the class form, and never in the
   instance form, where the dataclass constructor ran it already. Two fields of one class or interface, a
   `Provide[T]` field or an annotation that is not a class raise `TypeError` from `Injector.context()` or `apply()`.
-  The child is built at `__enter__` from the context current then; two fields resolving to one singleton, including a
-  preset whose class another field declares, raise `TypeError` there, and nothing is pushed. The parent's objects are
-  never changed.
-* `smalldi.context.InjectionContextSingletonOverride` is a deprecated alias of `InjectionContextOverride`: importing
-  or accessing it warns with `DeprecationWarning`, and it is removed no earlier than 1.0.0.
+  The child is built at `__enter__` from the context current then; two concrete fields resolving to one singleton
+  raise `TypeError` there, and nothing is pushed. The parent's objects are never changed.
+* `smalldi.context.InjectionContextSingletonOverride` and `smalldi.InjectionContextSingletonOverride` are deprecated
+  aliases of `InjectionContextOverride`: importing or accessing either warns with `DeprecationWarning`, and they are
+  removed no earlier than 1.0.0.
 
 The [docs](https://github.com/0xf104a/smalldi/blob/master/docs/index.md) have diagrams of what each kind shares with
 its parent and of the per-slice context stacks ([contexts](https://github.com/0xf104a/smalldi/blob/master/docs/contexts.md)),

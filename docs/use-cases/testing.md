@@ -125,7 +125,9 @@ inside a context keeps its registrations in that context and is never imported a
   way, with the interface as the target.
 * **A ready-made object, such as a mock:** a declared context. A field `name: T = None` gives the block a singleton
   of its own for `T`, and passing an instance, `Fixture(name=obj)`, presets it. `name: ImplementationOf[I] = obj`
-  does the same for an interface `I`. Declare every singleton that depends on the preset as a field too, so the
+  binds the interface `I` to `obj`, which must be an instance of `I`: a mock built with `spec=I` is one. The class of
+  `obj` is not registered, so one fake class, or one object, may serve several interface fields. Declare every
+  singleton that depends on the preset as a field too, so the
   instances built with it stay in the block: a declared context is `SHALLOW`, and an undeclared singleton is the one
   the parent sees.
 * **One function, one call:** pass the dependency as a keyword argument, `snack_time(cat=fake_cat)`. No context

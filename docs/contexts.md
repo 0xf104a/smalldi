@@ -207,19 +207,20 @@ flowchart LR
 `smalldi.context.InjectionContextOverride` builds a `SHALLOW` child, a declared context, from the fields of a dataclass
 subclass. `Injector.context` takes the subclass, whose defaults are the values, or an instance of it, whose attributes
 are; `apply(context)` on either derives the same child from a given context and returns it unpushed.
-`smalldi.context.InjectionContextSingletonOverride` is a deprecated alias of the base class that warns with
-`DeprecationWarning` on every import or attribute access. Each field is one of:
+`smalldi.context.InjectionContextSingletonOverride` and `smalldi.InjectionContextSingletonOverride` are deprecated
+aliases of the base class that warn with `DeprecationWarning` on every import or attribute access. Each field is one
+of:
 
 | Field                                | Effect on the child                                                                                                                              |
 |--------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
 | `n: T`                               | The child's own `LazySingleton` for `T`: a registered `T` is cloned as `RESET` clones it, and keys that shared `T`'s object share the clone; an unregistered `T` is registered in the child only. `T` is a concrete class: an abstract one, registered as an interface or not, raises `TypeError` when the manager is created, and the message names `n: ImplementationOf[T]` as the way to declare an interface. |
 | `n: T = instance`                    | The child's singleton for `T` gets `instance` and is frozen. The parent never sees it.                                                            |
 | `n: ImplementationOf[I]`             | The child's own binding for the interface `I`, with neither implementation nor override, whatever the parent has: the block binds it with `@Injector.implements(I)` or `@Injector.override(I)`. A request for `I` before it is bound raises `RuntimeError` and freezes the binding. An `I` the parent doesn't know is registered in the child only. `I` is an abstract class: `ImplementationOf[C]` with a concrete `C` raises `TypeError` when the manager is created, and the message names `n: C`. |
-| `n: ImplementationOf[I] = instance`  | The child's own singleton for `type(instance)`, made exactly as `n: type(instance) = instance` makes it, bound as the frozen implementation of `I`: `Provide[I]` and `Provide[type(instance)]` are one object in the block. `instance` is not checked against `I`. |
+| `n: ImplementationOf[I] = instance`  | The child's binding of `I` gets `instance` as its implementation and is frozen: `Provide[I]` is `instance` in the block. The instance is held by a `LazySingleton` of the binding alone, not by the child's registry dict, so `type(instance)` is not registered and `Provide[type(instance)]` resolves as in the parent; several interface fields may hold instances of one class, or one object. `instance` must be an instance of `I`, else `TypeError` when the manager is created; a mock built with `spec=I` passes. |
 
 `ImplementationOf[I] | None`, `Optional[ImplementationOf[I]]` and `ImplementationOf[I | None]` all declare `I`.
-`ImplementationOf` is exported by `smalldi`. Two fields that resolve to one singleton, such as a preset whose class
-another field declares, raise `TypeError` at `__enter__` and nothing is pushed.
+`ImplementationOf` is exported by `smalldi`. Two concrete fields that resolve to one singleton raise `TypeError` at
+`__enter__` and nothing is pushed.
 
 A plain default value is one object, preset in every context derived from the class, in the class form and in every
 instance built without that argument; `Injector.context` and `apply` warn about it with `UserWarning` once per class,
@@ -249,8 +250,7 @@ flowchart LR
         cBlanket["key Blanket (default_factory)"] --> LS2c["LazySingleton Blanket<br/>frozen, instance = Blanket('pink')"]
         cBowl["key SnackBowl (child only)"] --> LS3["LazySingleton SnackBowl"]
         cBall["key Ball (shared)"] --> LS5
-        cFeather["key Feather (child only)"] --> LS4["LazySingleton Feather<br/>frozen, instance = Feather()"]
-        cToy["binding Toy (ImplementationOf), frozen"] -- implementation --> LS4
+        cToy["binding Toy (ImplementationOf), frozen"] -- implementation --> LS4["LazySingleton Feather, binding only<br/>frozen, instance = Feather()"]
     end
     LS1 -. "clone()" .-> LS1c
     LS2 -. "clone(), set_instance()" .-> LS2c
@@ -305,7 +305,7 @@ with Injector.context():
         print(Injector.get_instance(Blanket).colour)           # pink
         print(Injector.is_singleton(SnackBowl))                # True
         print(Injector.get_instance(Toy).squeak())             # swish: the block's own binding, preset
-        print(Injector.get_instance(Toy) is Injector.get_instance(Feather))   # True: one singleton for Toy and Feather
+        print(Injector.is_singleton(Feather))                  # False: the feather is held by the binding of Toy alone
         print(Injector.get_instance(Ball) is outer_ball)       # True: Ball isn't declared, so it is shared
     print(Injector.get_instance(CookieJar) is outer_jar)       # True
     print(Injector.get_instance(Blanket).colour)               # grey: the parent's Blanket is its own
@@ -314,11 +314,12 @@ with Injector.context():
     print(Injector.is_singleton(Feather))                      # False
 ```
 
-A context opened inside the block derives from the declared context as from any other parent. A `SHALLOW` child, or
-a declared child that doesn't declare `I` itself, holds the same `LazySingleton` objects, so the preset is still
-there, but its binding for `I` is a new, unfrozen one: the nested block may override `I`, while `type(instance)` stays
-frozen and accepts no override. A `RESET` or `STACK` child drops the preset: its singleton for `type(instance)` is a
-fresh one without an instance, still bound as the implementation of `I`, so `I` resolves to a new object there.
+A context opened inside the block derives from the declared context as from any other parent, and the binding-only
+singleton of a preset goes through the same transform as the registry singletons. A `SHALLOW` child, or a declared
+child that doesn't declare `I` itself, refers to the same frozen object, so `I` still resolves to the preset, but its
+binding for `I` is a new, unfrozen one: the nested block may override `I`. A `RESET` or `STACK` child drops the preset:
+the binding refers to a clone, or a fresh singleton, of `type(instance)` without an instance, so `I` resolves to a
+new instance built by its constructor there.
 
 ## Context trees
 

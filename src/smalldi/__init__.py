@@ -24,7 +24,9 @@ module, the module-level shorthands `singleton`, `interface`, `implements`,
 `Injector.is_interface`, `smalldi.context.InjectionSubcontextType`,
 `smalldi.context.InjectionContextOverride`,
 `smalldi.decorator.oneshot`, `smalldi.decorator.OneshotLevel` and
-`smalldi.thread.ContextAwareThread`.
+`smalldi.thread.ContextAwareThread`. `smalldi.InjectionContextSingletonOverride`
+is a deprecated alias of `smalldi.context.InjectionContextOverride`, served by
+a module `__getattr__` that warns with `DeprecationWarning` on every access.
 """
 import functools
 import inspect
@@ -32,7 +34,7 @@ import threading
 import types
 import warnings
 from inspect import isabstract
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 from smalldi._context import InjectionContextRegistry
 from smalldi._singleton import LazySingleton, SingletonFrozenError
@@ -40,7 +42,7 @@ from smalldi.annotation import _Provide, Provide, ImplementationOf
 from smalldi.asynchronous import wrap_coroutine_function
 from smalldi.concurrency import threadsafe, mutex
 from smalldi.context import (InjectionContext, InjectionSubcontextType, InjectionContextManager,
-                             InjectionContextOverride, _DeclaredContext)
+                             InjectionContextOverride, _DeclaredContext, _SINGLETON_OVERRIDE_DEPRECATION)
 from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
@@ -483,7 +485,8 @@ class Injector:
         * a subclass of `InjectionContextOverride`: the `SHALLOW` child its
           fields declare, with the fields' defaults as the preset instances and
           an `ImplementationOf[I]` field giving the child its own binding of
-          the interface `I`;
+          the interface `I`, bound to the preset, an instance of `I`, if the
+          field has one;
         * an instance of such a subclass: the same child, with the instance's
           attributes as the preset instances.
 
@@ -499,8 +502,8 @@ class Injector:
         :raises TypeError: for a declared child, if the class inherits dataclass fields without being
             decorated with `@dataclasses.dataclass` itself, a field's annotation is `Provide[T]`, isn't
             a class, is an abstract class without `ImplementationOf`, is `ImplementationOf[C]` with a
-            concrete `C`, or two fields declare one class; from `__enter__`, if two fields resolve to
-            one singleton
+            concrete `C`, two fields declare one class, or the value of an `ImplementationOf[I]` field
+            is not an instance of `I`; from `__enter__`, if two fields resolve to one singleton
         :raises RuntimeError: from `__enter__`, if the manager was entered before; from `__exit__`,
             if the context it pushed is not the slice's innermost one, in which case nothing is popped
         """
@@ -672,3 +675,25 @@ def isinterface(tp: type) -> bool:
     :return: True if `tp` was registered with `@Injector.interface` in the current context
     """
     return Injector.is_interface(tp)
+
+
+def __getattr__(name: str) -> Any:
+    """
+    Serves the deprecated name `InjectionContextSingletonOverride` with a `DeprecationWarning`.
+
+    The name is not cached in the package, so every import or attribute access
+    warns, with the message of `smalldi.context.__getattr__`; `import smalldi`
+    alone doesn't warn. Removal no earlier than 1.0.0.
+
+    :param name: the attribute looked up on the package
+    :return: `smalldi.context.InjectionContextOverride` for the deprecated name
+    :raises AttributeError: for any other name
+    """
+    if name == "InjectionContextSingletonOverride":
+        warnings.warn(_SINGLETON_OVERRIDE_DEPRECATION, DeprecationWarning, stacklevel=2)
+        return InjectionContextOverride
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+if TYPE_CHECKING:
+    InjectionContextSingletonOverride = InjectionContextOverride
