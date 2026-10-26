@@ -62,3 +62,5 @@ include = [
   "/CHANGELOG.md",
   "/docs",
 ]
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__".msg = "`__future__` imports are prohibited in smalldi: `Injector.inject` reads `Provide[T]` from the annotations as written, and stringified annotations are silently not injected. Write the syntax Python 3.11 evaluates."

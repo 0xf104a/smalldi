@@ -70,7 +70,8 @@ print(snack_time())  # a cookie, 0 left: Pusheen's jar again
 A declared context, an `InjectionContextOverride` subclass passed as the kind, is a `SHALLOW` child where every field
 names a singleton of the block's own, optionally with a preset instance, and `ImplementationOf[I]` fields give the
 block its own binding of the interface `I`, bound to a preset instance of `I` if the field has one; the preset's class
-is not registered by it.
+is not registered by it. A `SHALLOW`, `PRESERVE` or declared context opened inside the block shares the preset; a
+`RESET` or `STACK` one starts with `I` unbound, since a preset is a value and not a registration to rebuild.
 
 ## What to know
 

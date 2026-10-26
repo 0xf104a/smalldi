@@ -314,12 +314,14 @@ with Injector.context():
     print(Injector.is_singleton(Feather))                      # False
 ```
 
-A context opened inside the block derives from the declared context as from any other parent, and the binding-only
-singleton of a preset goes through the same transform as the registry singletons. A `SHALLOW` child, or a declared
-child that doesn't declare `I` itself, refers to the same frozen object, so `I` still resolves to the preset, but its
-binding for `I` is a new, unfrozen one: the nested block may override `I`. A `RESET` or `STACK` child drops the preset:
-the binding refers to a clone, or a fresh singleton, of `type(instance)` without an instance, so `I` resolves to a
-new instance built by its constructor there.
+A context opened inside the block derives from the declared context as from any other parent. A preset is a value,
+not a registration, so it is shared or dropped, never rebuilt. A `SHALLOW` or `PRESERVE` child, or a declared child
+that doesn't declare `I` itself, refers to the same preset object, so `I` still resolves to it; a `SHALLOW` or declared
+child's binding for `I` is a new, unfrozen one, so the nested block may override `I`. A `RESET` or `STACK` child
+leaves its binding for `I` unbound: nothing is constructed and `type(instance)` stays unregistered, the nested block
+binds `I` with `@Injector.implements(I)` or `@Injector.override(I)`, and a request before that raises `RuntimeError`
+and freezes the nested binding. Interfaces bound to registry singletons are rebound to the fresh singletons as usual.
+After the nested block, the declared context's binding is as it was: `I` resolves to the preset, frozen.
 
 ## Context trees
 

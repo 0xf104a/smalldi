@@ -11,6 +11,8 @@
   `instance` in the block and the binding accepts no override. The instance is held by a singleton of the binding
   alone: `type(instance)` is not registered, `Provide[type(instance)]` resolves as in the parent, and several
   interface fields may hold instances of one class, or one object, as may a concrete field and an interface field.
+  A preset is shared by a nested `SHALLOW`, `PRESERVE` or declared context and leaves the binding unbound in a nested
+  `RESET` or `STACK` context, where nothing is constructed from its class.
   A value that is no instance of `I` raises `TypeError` from `Injector.context(...)` or `apply(...)`, before anything
   is derived or pushed; a mock built with `spec=I` passes. `ImplementationOf[I] | None`,
   `Optional[ImplementationOf[I]]` and `ImplementationOf[I | None]` all declare `I`. The parent's binding for `I` is
@@ -23,6 +25,9 @@
   the in-depth pages: one short page per feature with a runnable example and what to know about it, and one
   complete program per scenario (wiring an application, swapping implementations, testing, plugins and
   registries, threads and asyncio); `.github/scripts/check_docs.py` runs their examples and checks their links
+* The house rule that no file of the repository imports from `__future__`, with its checks: `src/tests/test_no_future_imports.py`
+  scans the package, the tests and the scripts, ruff's `TID251` flags the import in CI, and
+  `.github/scripts/check_docs.py` fails a documentation example containing it
 
 ### Changed
 * `smalldi.context.InjectionContextSingletonOverride` is renamed `smalldi.context.InjectionContextOverride`, the
@@ -39,8 +44,8 @@
   removal no earlier than 1.0.0
 * `smalldi.InjectionContextSingletonOverride`, the package-level spelling of that name as it existed in 0.5.0: the
   same class object, served by a module `__getattr__` in `smalldi/__init__.py` that warns with `DeprecationWarning`
-  on every import or attribute access, with the same message; `import smalldi` alone doesn't warn; removal no earlier
-  than 1.0.0
+  on every import or attribute access, with a message naming that spelling; `import smalldi` alone doesn't warn;
+  removal no earlier than 1.0.0
 
 ## 0.5.0
 ### Added

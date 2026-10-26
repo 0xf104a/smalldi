@@ -63,7 +63,7 @@ jobs:
       - name: Install ruff
         run: python -m pip install ruff==0.17.0
       - name: Run ruff
-        run: ruff check src --select F,PLE,B006,B008,B017,B018,B023
+        run: ruff check src .github/scripts --select F,PLE,B006,B008,B017,B018,B023,TID251
 
   typecheck:
     runs-on: ubuntu-latest

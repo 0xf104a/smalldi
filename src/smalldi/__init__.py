@@ -42,7 +42,7 @@ from smalldi.annotation import _Provide, Provide, ImplementationOf
 from smalldi.asynchronous import wrap_coroutine_function
 from smalldi.concurrency import threadsafe, mutex
 from smalldi.context import (InjectionContext, InjectionSubcontextType, InjectionContextManager,
-                             InjectionContextOverride, _DeclaredContext, _SINGLETON_OVERRIDE_DEPRECATION)
+                             InjectionContextOverride, _DeclaredContext, _deprecation_message)
 from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
@@ -682,15 +682,17 @@ def __getattr__(name: str) -> Any:
     Serves the deprecated name `InjectionContextSingletonOverride` with a `DeprecationWarning`.
 
     The name is not cached in the package, so every import or attribute access
-    warns, with the message of `smalldi.context.__getattr__`; `import smalldi`
-    alone doesn't warn. Removal no earlier than 1.0.0.
+    warns; the message names `smalldi.InjectionContextSingletonOverride`, the
+    spelling that was used. `import smalldi` alone doesn't warn. Removal no
+    earlier than 1.0.0.
 
     :param name: the attribute looked up on the package
     :return: `smalldi.context.InjectionContextOverride` for the deprecated name
     :raises AttributeError: for any other name
     """
     if name == "InjectionContextSingletonOverride":
-        warnings.warn(_SINGLETON_OVERRIDE_DEPRECATION, DeprecationWarning, stacklevel=2)
+        warnings.warn(_deprecation_message(f"{__name__}.InjectionContextSingletonOverride"),
+                      DeprecationWarning, stacklevel=2)
         return InjectionContextOverride
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

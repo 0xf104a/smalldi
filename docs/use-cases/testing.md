@@ -127,9 +127,10 @@ inside a context keeps its registrations in that context and is never imported a
   of its own for `T`, and passing an instance, `Fixture(name=obj)`, presets it. `name: ImplementationOf[I] = obj`
   binds the interface `I` to `obj`, which must be an instance of `I`: a mock built with `spec=I` is one. The class of
   `obj` is not registered, so one fake class, or one object, may serve several interface fields. Declare every
-  singleton that depends on the preset as a field too, so the
-  instances built with it stay in the block: a declared context is `SHALLOW`, and an undeclared singleton is the one
-  the parent sees.
+  singleton that depends on the preset as a field too, so the instances built with it stay in the block: a declared
+  context is `SHALLOW`, and an undeclared singleton is the one the parent sees. A `RESET` or `STACK` context opened
+  inside the block doesn't keep the preset: `I` is unbound there until the nested block binds it, and nothing is
+  constructed from the preset's class.
 * **One function, one call:** pass the dependency as a keyword argument, `snack_time(cat=fake_cat)`. No context
   needed.
 * **The root already overrides what the test wants to fake:** open `Injector.context(InjectionSubcontextType.STACK)`

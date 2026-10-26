@@ -5,8 +5,9 @@ Every ```python block of README.md, docs/*.md, docs/features/*.md and docs/use-c
 and doesn't call `input(` runs in its own process, from a temporary directory, with `src` on `sys.path`. Every
 ```mermaid block of those pages is parsed by mermaid under Node, through check_mermaid.mjs next to this script,
 which needs `mermaid` and `jsdom` resolvable from the repository root. Every relative Markdown link of those pages
-must point to an existing file. The exit status is non-zero when any check fails. The migration guides are not
-checked: their before/after snippets show code that fails on purpose.
+must point to an existing file. No ```python block of those pages, titled or not, imports from `__future__`. The
+exit status is non-zero when any check fails. The migration guides are not checked: their before/after snippets
+show code that fails on purpose.
 """
 import json
 import os
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MERMAID_SCRIPT = Path(__file__).resolve().with_name("check_mermaid.mjs")
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 URL_SCHEME = re.compile(r"^[a-z][a-z0-9+.\-]*:", re.IGNORECASE)
+FUTURE_IMPORT = re.compile(r"^\s*(?:from\s+__future__\s+import|import\s+__future__)\b", re.MULTILINE)
 EXAMPLE_TIMEOUT = 300
 
 
@@ -92,6 +94,15 @@ def run_example(block: Block) -> bool:
     return False
 
 
+def check_no_future_import(block: Block) -> bool:
+    match = FUTURE_IMPORT.search(block.code)
+    if match is None:
+        return True
+    line = block.line + block.code.count("\n", 0, match.start()) + 1
+    print(f"FAIL future import {block.file.relative_to(ROOT)}:{line}: `__future__` imports are prohibited")
+    return False
+
+
 def check_mermaid(blocks: list[Block]) -> bool:
     payload = [{"file": str(block.file.relative_to(ROOT)), "line": block.line, "code": block.code}
                for block in blocks]
@@ -126,6 +137,8 @@ def main() -> int:
     for path in documents():
         blocks, prose = parse(path)
         for block in blocks:
+            if block.language.startswith("python") and not check_no_future_import(block):
+                failures += 1
             if is_example(block) and not run_example(block):
                 failures += 1
             if block.language == "mermaid" and ROOT / "docs" in path.parents:

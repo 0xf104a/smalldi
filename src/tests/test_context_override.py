@@ -11,7 +11,9 @@ with a value, an instance of `I`, bound to it and frozen. The value is held by
 a singleton of the binding alone: its class is not registered by the preset, so
 several interface fields may hold instances of one class, or one object, and a
 value that is no instance of `I` raises `TypeError` from `Injector.context`.
-`Injector.context` takes the subclass, with its defaults, or an instance of it,
+A preset is shared by a nested `SHALLOW`, `PRESERVE` or declared context and
+leaves the binding unbound in a nested `RESET` or `STACK` context, where
+nothing is constructed. `Injector.context` takes the subclass, with its defaults, or an instance of it,
 with its attributes; `apply(context)` derives the child of a given context
 without pushing it. A plain abstract class is refused as a field, as is
 `ImplementationOf[C]` with a concrete `C`. `InjectionContextSingletonOverride`
@@ -1342,7 +1344,103 @@ def test_nested_shallow_context_resolves_to_the_preset():
         assert type(Injector.get_instance(Treat)) is Cookie
 
 
-def test_nested_reset_context_builds_a_new_instance_of_the_preset_class():
+class Counted(Treat):
+    """A fake whose constructor records its calls, so a test can assert it was never built."""
+    calls: list[tuple] = []
+
+    def __init__(self, *args):
+        Counted.calls.append(args)
+
+    def eat(self):
+        return "counted"
+
+
+class Flavoured(Treat):
+    """A fake whose constructor needs an argument, so a rebuild without one would raise TypeError."""
+    def __init__(self, flavour: str):
+        Counted.calls.append((flavour,))
+        self.flavour = flavour
+
+    def eat(self):
+        return self.flavour
+
+
+@pytest.fixture
+def constructor_calls():
+    Counted.calls.clear()
+    yield Counted.calls
+    Counted.calls.clear()
+
+
+REBUILDING_KINDS = [InjectionSubcontextType.RESET, InjectionSubcontextType.STACK]
+REBUILDING_IDS = ["reset", "stack"]
+
+
+@pytest.mark.parametrize("kind", REBUILDING_KINDS, ids=REBUILDING_IDS)
+def test_nested_rebuilding_context_leaves_a_defaulted_fake_preset_unbound(kind, constructor_calls):
+    with Injector.context():
+        _bind_cookie()
+
+        @dataclasses.dataclass
+        class Fixture(InjectionContextOverride):
+            treat: ImplementationOf[Treat] | None = None
+
+        fake = Counted()
+        constructor_calls.clear()
+        with Injector.context(Fixture(treat=fake)):
+            with Injector.context(kind):
+                assert Injector.is_interface(Treat)
+                assert not Injector.is_singleton(Counted)
+                with pytest.raises(RuntimeError, match="not implemented"):
+                    Injector.get_instance(Treat)
+                assert not Injector.is_singleton(Counted)
+            assert Injector.get_instance(Treat) is fake
+        assert constructor_calls == []
+        assert type(Injector.get_instance(Treat)) is Cookie
+
+
+@pytest.mark.parametrize("kind", REBUILDING_KINDS, ids=REBUILDING_IDS)
+def test_nested_rebuilding_context_leaves_a_preset_needing_arguments_unbound(kind, constructor_calls):
+    with Injector.context():
+        _bind_cookie()
+
+        @dataclasses.dataclass
+        class Fixture(InjectionContextOverride):
+            treat: ImplementationOf[Treat] | None = None
+
+        preset = Flavoured("tuna")
+        constructor_calls.clear()
+        with Injector.context(Fixture(treat=preset)):
+            with Injector.context(kind):
+                with pytest.raises(RuntimeError, match="not implemented"):
+                    Injector.get_instance(Treat)
+                assert not Injector.is_singleton(Flavoured)
+            assert Injector.get_instance(Treat) is preset
+        assert constructor_calls == []
+
+
+@pytest.mark.parametrize("kind", REBUILDING_KINDS, ids=REBUILDING_IDS)
+def test_nested_rebuilding_context_leaves_a_mock_preset_unbound(kind):
+    with Injector.context():
+        _bind_cookie()
+
+        @dataclasses.dataclass
+        class Fixture(InjectionContextOverride):
+            treat: ImplementationOf[Treat] | None = None
+
+        mock = Mock(spec=Treat)
+        with Injector.context(Fixture(treat=mock)):
+            with Injector.context(kind):
+                with pytest.raises(RuntimeError, match="not implemented"):
+                    Injector.get_instance(Treat)
+                assert not Injector.is_singleton(Mock)
+                assert not Injector.is_singleton(type(mock))
+            assert Injector.get_instance(Treat) is mock
+        assert not mock.mock_calls
+
+
+@pytest.mark.parametrize("kind", REBUILDING_KINDS, ids=REBUILDING_IDS)
+def test_nested_rebuilding_context_lets_the_block_implement_the_interface(kind):
     with Injector.context():
         _bind_cookie()
 
@@ -1352,17 +1450,29 @@ def test_nested_reset_context_builds_a_new_instance_of_the_preset_class():
 
         fake = Fake()
         with Injector.context(Fixture(treat=fake)):
-            with Injector.context(InjectionSubcontextType.RESET):
-                inner = Injector.get_instance(Treat)
-                assert type(inner) is Fake
-                assert inner is not fake
-                assert Injector.get_instance(Treat) is inner
-                assert not Injector.is_singleton(Fake)
+            with Injector.context(kind):
+                @Injector.implements(Treat)
+                @Injector.singleton
+                class Biscuit(Treat):
+                    def eat(self):
+                        return "snap"
+
+                assert type(Injector.get_instance(Treat)) is Biscuit
+            assert Injector.get_instance(Treat) is fake
+
+            @Injector.singleton
+            class Wafer(Treat):
+                def eat(self):
+                    return "crisp"
+
+            with pytest.raises(SingletonFrozenError):
+                Injector.override(Treat)(Wafer)
             assert Injector.get_instance(Treat) is fake
         assert type(Injector.get_instance(Treat)) is Cookie
 
 
-def test_nested_stack_context_builds_a_new_instance_of_the_preset_class():
+@pytest.mark.parametrize("kind", REBUILDING_KINDS, ids=REBUILDING_IDS)
+def test_nested_rebuilding_context_lets_the_block_override_the_interface(kind):
     with Injector.context():
         _bind_cookie()
 
@@ -1372,26 +1482,7 @@ def test_nested_stack_context_builds_a_new_instance_of_the_preset_class():
 
         fake = Fake()
         with Injector.context(Fixture(treat=fake)):
-            with Injector.context(InjectionSubcontextType.STACK):
-                inner = Injector.get_instance(Treat)
-                assert type(inner) is Fake
-                assert inner is not fake
-                assert Injector.get_instance(Treat) is inner
-                assert not Injector.is_singleton(Fake)
-            assert Injector.get_instance(Treat) is fake
-        assert type(Injector.get_instance(Treat)) is Cookie
-
-
-def test_nested_stack_context_lets_the_block_override_the_preset_class():
-    with Injector.context():
-        _bind_cookie()
-
-        @dataclasses.dataclass
-        class Fixture(InjectionContextOverride):
-            treat: ImplementationOf[Treat] | None = None
-
-        with Injector.context(Fixture(treat=Fake())):
-            with Injector.context(InjectionSubcontextType.STACK):
+            with Injector.context(kind):
                 @Injector.override(Treat)
                 @Injector.singleton
                 class Biscuit(Treat):
@@ -1399,6 +1490,98 @@ def test_nested_stack_context_lets_the_block_override_the_preset_class():
                         return "snap"
 
                 assert type(Injector.get_instance(Treat)) is Biscuit
+            assert Injector.get_instance(Treat) is fake
+
+            @Injector.singleton
+            class Wafer(Treat):
+                def eat(self):
+                    return "crisp"
+
+            with pytest.raises(SingletonFrozenError):
+                Injector.override(Treat)(Wafer)
+            assert Injector.get_instance(Treat) is fake
+        assert type(Injector.get_instance(Treat)) is Cookie
+
+
+@pytest.mark.parametrize("kind", REBUILDING_KINDS, ids=REBUILDING_IDS)
+def test_nested_rebuilding_context_leaves_two_interfaces_sharing_one_preset_unbound(kind, constructor_calls):
+    with Injector.context():
+        _bind_cookie()
+
+        class Toy(abc.ABC):
+            @abc.abstractmethod
+            def squeak(self): ...
+
+        class Both(Treat, Toy):
+            def __init__(self):
+                Counted.calls.append(())
+
+            def eat(self):
+                return "both"
+
+            def squeak(self):
+                return "both"
+
+        @dataclasses.dataclass
+        class Fixture(InjectionContextOverride):
+            treat: ImplementationOf[Treat] | None = None
+            toy: ImplementationOf[Toy] | None = None
+
+        both = Both()
+        constructor_calls.clear()
+        with Injector.context(Fixture(treat=both, toy=both)):
+            assert Injector.get_instance(Treat) is both
+            assert Injector.get_instance(Toy) is both
+            with Injector.context(kind):
+                with pytest.raises(RuntimeError, match="not implemented"):
+                    Injector.get_instance(Treat)
+                with pytest.raises(RuntimeError, match="not implemented"):
+                    Injector.get_instance(Toy)
+                assert not Injector.is_singleton(Both)
+            assert Injector.get_instance(Treat) is both
+            assert Injector.get_instance(Toy) is both
+        assert constructor_calls == []
+        assert not Injector.is_interface(Toy)
+
+
+def test_nested_preserve_context_resolves_to_the_preset():
+    with Injector.context():
+        _bind_cookie()
+
+        @dataclasses.dataclass
+        class Fixture(InjectionContextOverride):
+            treat: ImplementationOf[Treat] | None = None
+
+        fake = Fake()
+        with Injector.context(Fixture(treat=fake)) as declared:
+            with Injector.context(InjectionSubcontextType.PRESERVE) as nested:
+                assert nested is declared
+                assert Injector.get_instance(Treat) is fake
+                assert not Injector.is_singleton(Fake)
+            assert Injector.get_instance(Treat) is fake
+        assert type(Injector.get_instance(Treat)) is Cookie
+
+
+@pytest.mark.parametrize("kind", REBUILDING_KINDS, ids=REBUILDING_IDS)
+def test_nested_rebuilding_context_rebuilds_registry_singletons_bound_in_the_block(kind):
+    with Injector.context():
+        Injector.interface(Treat)
+
+        @dataclasses.dataclass
+        class Fixture(InjectionContextOverride):
+            treat: ImplementationOf[Treat] | None = None
+            cookie: Cookie | None = None
+
+        with Injector.context(Fixture):
+            Injector.implements(Treat)(Cookie)  # the field registered Cookie in the block
+            outer = Injector.get_instance(Treat)
+            assert type(outer) is Cookie
+            with Injector.context(kind):
+                inner = Injector.get_instance(Treat)
+                assert type(inner) is Cookie
+                assert inner is not outer
+                assert Injector.get_instance(Cookie) is inner
+            assert Injector.get_instance(Treat) is outer
 
 
 def test_parent_binding_is_unchanged_after_the_block():
@@ -1497,6 +1680,32 @@ def test_two_fields_declaring_one_interface_are_rejected():
         assert not Injector.is_interface(Treat)
 
 
+def test_two_concrete_fields_resolving_to_one_parent_singleton_are_rejected():
+    with Injector.context() as outer:
+        @Injector.singleton
+        class Base:
+            pass
+
+        @Injector.override(Base)
+        @Injector.singleton
+        class Over(Base):
+            pass
+
+        @dataclasses.dataclass
+        class Aliases(InjectionContextOverride):
+            base: Base | None = None
+            over: Over | None = None
+
+        for _ in range(2):
+            with pytest.raises(TypeError, match="resolve to one singleton"):
+                with Injector.context(Aliases):
+                    pass
+            with pytest.raises(TypeError, match="resolve to one singleton"):
+                Aliases.apply(outer)
+        assert Injector.get_context() is outer
+        assert Injector.get_instance(Base) is Injector.get_instance(Over)
+
+
 def test_plain_abstract_field_refusal_names_implementation_of():
     with Injector.context():
         @dataclasses.dataclass
@@ -1586,12 +1795,15 @@ def test_deprecated_name_imports_from_the_package():
     assert "InjectionContextSingletonOverride" not in smalldi.__all__
 
 
-def test_deprecated_package_name_warns_with_the_module_message():
+def test_deprecated_names_warn_with_the_spelling_that_was_used():
+    shared = " is deprecated and will be removed in 1.0.0; use smalldi.context.InjectionContextOverride instead"
     with pytest.warns(DeprecationWarning) as from_package:
-        getattr(smalldi, "InjectionContextSingletonOverride")
+        fetched_from_package = getattr(smalldi, "InjectionContextSingletonOverride")
     with pytest.warns(DeprecationWarning) as from_module:
-        getattr(smalldi.context, "InjectionContextSingletonOverride")
-    assert str(from_package[0].message) == str(from_module[0].message)
+        fetched_from_module = getattr(smalldi.context, "InjectionContextSingletonOverride")
+    assert str(from_package[0].message) == "smalldi.InjectionContextSingletonOverride" + shared
+    assert str(from_module[0].message) == "smalldi.context.InjectionContextSingletonOverride" + shared
+    assert fetched_from_package is fetched_from_module is InjectionContextOverride
 
 
 def test_new_names_do_not_warn():

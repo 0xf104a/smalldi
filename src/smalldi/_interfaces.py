@@ -157,16 +157,18 @@ class _LazyInterfaceImpl:
         Returns a new, unfrozen binding whose implementation is this binding's override, or its implementation if it
         has no override, and which has no override.
 
-        :return: the new binding, referring to the same `LazySingleton` object
+        An unbound binding, one whose slots are both None, gives an unbound
+        binding.
+
+        :return: the new binding, referring to the same `LazySingleton` object, or unbound
         """
         new_instance = self.__class__(self.interface)
-        my_impl = None
         if self.override_singleton is not None:
-            my_impl = self.override_singleton
+            new_instance.implementation_singleton = self.override_singleton
         else:
-            my_impl = self.implementation_singleton
-        new_instance.implementation_singleton = my_impl
+            new_instance.implementation_singleton = self.implementation_singleton
         return new_instance
+
 
 class InterfaceResolver:
     """
@@ -272,7 +274,7 @@ class InterfaceResolver:
 
     @threadsafe
     def rewired(self, derived: dict[int, LazySingleton],
-                derive: Callable[[LazySingleton], LazySingleton]) -> 'InterfaceResolver':
+                derive: Callable[[LazySingleton], LazySingleton | None]) -> 'InterfaceResolver':
         """
         Returns a new resolver with a new, unfrozen binding per interface, referring to the derived singletons.
 
@@ -280,15 +282,16 @@ class InterfaceResolver:
         by the `id` of the `LazySingleton` they refer to here, so a binding
         follows the object the context being derived holds for its singleton.
         A target absent from `derived`, a binding-only singleton holding the
-        preset of an `ImplementationOf[I]` field, is passed to `derive`, the
-        transform the derivation applies to its registry singletons, and the
-        result is stored in `derived`; so targets that are one object here are
-        one object in the new resolver, and `derived` is extended with the
-        objects made for such targets.
+        preset of an `ImplementationOf[I]` field, is passed to `derive`,
+        which returns the object the new binding refers to, or None to leave
+        the slot empty. An object it returns is stored in `derived`, so
+        targets that are one object here are one object in the new resolver.
+        A binding whose slots end up empty stays registered, unbound.
 
         :param derived: `id` of each singleton of the source context mapped to the object the derived context holds
             for it; extended with the objects made for targets absent from it
-        :param derive: makes the derived context's object for a singleton absent from `derived`
+        :param derive: makes the derived context's object for a singleton absent from `derived`, or returns None
+            to leave the slot empty
         :return: the new resolver
         """
         new_interfaces: dict[type, _LazyInterfaceImpl] = dict()
@@ -301,13 +304,14 @@ class InterfaceResolver:
 
     @staticmethod
     def _rewire(target: LazySingleton | None, derived: dict[int, LazySingleton],
-                derive: Callable[[LazySingleton], LazySingleton]) -> LazySingleton | None:
+                derive: Callable[[LazySingleton], LazySingleton | None]) -> LazySingleton | None:
         """
         Returns the derived context's object for one target of a binding, making it with `derive` if `derived`
         has none.
 
         :param target: the `LazySingleton` a binding refers to in the source context, or None for an empty slot
-        :param derived: see `rewired`; extended with the object made for `target` if it had none
+        :param derived: see `rewired`; extended with the object made for `target` if it had none and `derive`
+            returned one
         :param derive: see `rewired`
         :return: the object the new binding refers to, or None for an empty slot
         """
@@ -316,7 +320,8 @@ class InterfaceResolver:
         new_target = derived.get(id(target))
         if new_target is None:
             new_target = derive(target)
-            derived[id(target)] = new_target
+            if new_target is not None:
+                derived[id(target)] = new_target
         return new_target
 
     @threadsafe
@@ -351,7 +356,8 @@ class InterfaceResolver:
         implementation of a new, unfrozen binding without an override.
 
         Called on the resolver `rewired()` built for a `STACK` child, whose
-        bindings already refer to the fresh singletons of that child.
+        bindings already refer to the fresh singletons of that child, or are
+        unbound where they referred to a binding-only singleton.
 
         :return: the new resolver
         """

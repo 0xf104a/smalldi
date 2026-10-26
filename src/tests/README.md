@@ -18,6 +18,7 @@ cd src && python -m pytest
 - `test_concurrency.py` — `@synchronized` and `@threadsafe` from `smalldi.concurrency`
 - `test_oneshot.py` — `@oneshot` and `OneshotLevel` from `smalldi.decorator`: the three levels, refusals, failures, re-entrance and concurrent first calls
 - `test_wrappers.py` — `staticclass`
+- `test_no_future_imports.py` — the house rule that no Python file under `src/` or `.github/scripts/` imports from `__future__`
 
 The three specification files (`test_override_rules.py`, `test_interface_bindings.py`,
 `test_injector_concurrency.py`) define the binding and threading semantics of the library. Where the

@@ -122,9 +122,11 @@ class InjectionContext:
         its override mark, but without its instance and without its frozen
         state. Keys that map to one `LazySingleton` here map to one clone, so
         an overridden class and its override still share an instance. The
-        interfaces are rebound to the clones, with unfrozen bindings; a
+        interfaces are rebound to the clones, with unfrozen bindings. A
         binding-only singleton, one holding the preset of an
-        `ImplementationOf[I]` field, is cloned the same way.
+        `ImplementationOf[I]` field, is a value and not a registration: it is
+        neither cloned nor shared, so the slot that referred to it is empty
+        and the binding is unbound until the block binds it.
 
         :return: a new context whose instances are created independently of this one
         """
@@ -136,8 +138,7 @@ class InjectionContext:
                 cloned = singleton.clone()
                 clones_by_id[id(singleton)] = cloned
             new_singletons[key] = cloned
-        return self.__class__(new_singletons,
-                              self.interface_resolver.rewired(clones_by_id, LazySingleton.clone))
+        return self.__class__(new_singletons, self.interface_resolver.rewired(clones_by_id, _dropped))
 
     def stacked(self) -> 'InjectionContext':
         """
@@ -147,11 +148,13 @@ class InjectionContext:
         own class, becomes the class of a fresh `LazySingleton` that has no
         override and no instance and is not frozen, so it accepts a new
         override. Keys that map to one `LazySingleton` here map to one new
-        object, and a binding-only singleton, one holding the preset of an
-        `ImplementationOf[I]` field, becomes a fresh one of its class the same
-        way. Each interface's override, or its implementation if it has no
+        object. Each interface's override, or its implementation if it has no
         override, becomes the implementation of the new binding, which has no
-        override and accepts one.
+        override and accepts one. A binding-only singleton, one holding the
+        preset of an `ImplementationOf[I]` field, is a value and not a
+        registration: it is neither rebuilt nor shared, so the slot that
+        referred to it is empty and the binding is unbound until the block
+        binds it.
 
         :return: a new context in which every override of this one is the base
         """
@@ -163,15 +166,14 @@ class InjectionContext:
                 stacked_singleton = self._stacked_singleton(singleton)
                 stacked_by_id[id(singleton)] = stacked_singleton
             new_singletons[key] = stacked_singleton
-        return self.__class__(new_singletons,
-                              self.interface_resolver.rewired(stacked_by_id, self._stacked_singleton).stacked())
+        return self.__class__(new_singletons, self.interface_resolver.rewired(stacked_by_id, _dropped).stacked())
 
     @staticmethod
     def _stacked_singleton(singleton: LazySingleton) -> LazySingleton:
         """
         Makes the `STACK` child's singleton for one of this context's: a fresh `LazySingleton` of its effective class.
 
-        :param singleton: a `LazySingleton` of this context, registered or binding-only
+        :param singleton: a registered `LazySingleton` of this context
         :return: a new `LazySingleton` of its override class if it has one, else its own class, with no override,
             no instance and not frozen
         """
@@ -312,15 +314,17 @@ class _DeclaredContext:
 
         `parent`, its `LazySingleton` objects and its resolver are only read:
         every object the child gets is new and private until the context is
-        pushed, so a failure leaves `parent` as it was. Every check that can
-        fail runs in the first loop; `rewired` and `redeclare` run after the
-        last check, on the new resolver only. An `ImplementationOf[I]` field
+        pushed, so a failure leaves `parent` as it was. The only check that
+        can fail here, that two concrete fields resolve to one singleton of
+        `parent` through an override alias, runs in the first loop; `rewired`
+        and `redeclare` run after it, on the new resolver only. Two fields
+        declaring one class are refused earlier, by
+        `InjectionContextOverride._fields`. An `ImplementationOf[I]` field
         with a value puts it in a binding-only `LazySingleton` of its class,
         frozen on the value, which nothing but the child's binding of `I`
         refers to: it is not registered in the child's dict and takes no part
-        in the check that two fields resolve to one singleton. `redeclare`
-        then binds it as the frozen implementation of `I`; without a value
-        `redeclare` gives `I` an unbound binding.
+        in that check. `redeclare` then binds it as the frozen implementation
+        of `I`; without a value `redeclare` gives `I` an unbound binding.
 
         :param parent: the context to derive the child from
         :return: the child context, not pushed
@@ -329,41 +333,23 @@ class _DeclaredContext:
         singletons = copy.copy(parent.singletons_available)
         clones: dict[int, LazySingleton] = dict()
         claimed: dict[int, str] = dict()
-        fresh: dict[type, str] = dict()
         interfaces: list[tuple[type, LazySingleton | None]] = []
-
-        def own(name: str, cls: type, instance: Any) -> LazySingleton:
-            """The child's own singleton for `cls`: a clone of the parent's or a new registration, with `instance` if any."""
-            target = parent.singletons_available.get(cls)
-            if target is None:
-                other = fresh.get(cls)
-                if other is not None:
-                    raise TypeError(f"Fields {other!r} and {name!r} resolve to one singleton; declare it once")
-                created = LazySingleton(cls)
-                if instance is not None:
-                    created.set_instance(instance)
-                fresh[cls] = name
-                singletons[cls] = created
-                return created
-            other = claimed.get(id(target))
-            if other is not None:
-                raise TypeError(f"Fields {other!r} and {name!r} resolve to one singleton; declare it once")
-            claimed[id(target)] = name
-            cloned = target.clone()
-            if instance is not None:
-                cloned.set_instance(instance)
-            clones[id(target)] = cloned
-            return cloned
-
         for d in self.declarations:
             if d.is_interface:
                 implementation = None
                 if d.has_instance:
-                    implementation = LazySingleton(type(d.instance))
-                    implementation.set_instance(d.instance)
+                    implementation = self._holding(LazySingleton(type(d.instance)), d.instance)
                 interfaces.append((d.tp, implementation))
-            else:
-                own(d.name, d.tp, d.instance)
+                continue
+            target = parent.singletons_available.get(d.tp)
+            if target is None:
+                singletons[d.tp] = self._holding(LazySingleton(d.tp), d.instance)
+                continue
+            other = claimed.get(id(target))
+            if other is not None:
+                raise TypeError(f"Fields {other!r} and {d.name!r} resolve to one singleton; declare it once")
+            claimed[id(target)] = d.name
+            clones[id(target)] = self._holding(target.clone(), d.instance)
         for key, registered_singleton in list(singletons.items()):
             cloned = clones.get(id(registered_singleton))
             if cloned is not None:
@@ -372,6 +358,19 @@ class _DeclaredContext:
         for interface, implementation in interfaces:
             resolver.redeclare(interface, implementation)
         return InjectionContext(singletons, resolver)
+
+    @staticmethod
+    def _holding(singleton: LazySingleton, instance: Any) -> LazySingleton:
+        """
+        Presets `instance` on a new singleton of the child, if there is one.
+
+        :param singleton: a `LazySingleton` nothing refers to yet
+        :param instance: the value to preset, which freezes `singleton`, or None to preset nothing
+        :return: `singleton`
+        """
+        if instance is not None:
+            singleton.set_instance(instance)
+        return singleton
 
 
 class _hybridmethod:
@@ -441,7 +440,12 @@ class InjectionContextOverride:
       the parent, and several interface fields may hold instances of one
       class, or one object. `instance` must be an instance of `I`, else
       `TypeError` from `Injector.context(...)` or `apply(...)`; a mock built
-      with `spec=I` passes.
+      with `spec=I` passes. A preset is a value, not a registration: a
+      `SHALLOW` or `PRESERVE` child of the block, or a declared child that
+      doesn't declare `I` itself, shares the preset object, while a `RESET`
+      or `STACK` child leaves its binding of `I` unbound, so the nested block
+      binds `I` itself or gets `RuntimeError` on request. The block's own
+      binding is unchanged after the nested block.
 
     The parent's binding for `I` is never changed. Every other interface of
     the parent stays bound in the child, to the clones where their singletons
@@ -626,8 +630,29 @@ def _identity(value: Any) -> Any:
     return value
 
 
-_SINGLETON_OVERRIDE_DEPRECATION = ("smalldi.context.InjectionContextSingletonOverride is deprecated and will be removed "
-                                   "in 1.0.0; use smalldi.context.InjectionContextOverride instead")
+def _dropped(singleton: LazySingleton) -> None:
+    """
+    The `derive` of `InterfaceResolver.rewired` for `RESET` and `STACK`: a binding-only singleton gets no counterpart.
+
+    :param singleton: the binding-only `LazySingleton` holding a preset, ignored
+    :return: None, leaving the binding's slot empty
+    """
+    return None
+
+
+_SINGLETON_OVERRIDE_DEPRECATION = ("{name} is deprecated and will be removed in 1.0.0; "
+                                   "use smalldi.context.InjectionContextOverride instead")
+
+
+def _deprecation_message(name: str) -> str:
+    """
+    The `DeprecationWarning` message for one spelling of the deprecated alias `InjectionContextSingletonOverride`.
+
+    :param name: the attribute path that was used, `smalldi.context.InjectionContextSingletonOverride` or
+        `smalldi.InjectionContextSingletonOverride`
+    :return: the message, naming `name`
+    """
+    return _SINGLETON_OVERRIDE_DEPRECATION.format(name=name)
 
 
 def __getattr__(name: str) -> Any:
@@ -635,15 +660,16 @@ def __getattr__(name: str) -> Any:
     Serves the deprecated name `InjectionContextSingletonOverride` with a `DeprecationWarning`.
 
     The name is not cached in the module, so every import or attribute access
-    warns. `smalldi.__getattr__` serves the same name from the package with
-    the same message.
+    warns. `smalldi.__getattr__` serves the same name from the package, with
+    the message naming the package path.
 
     :param name: the attribute looked up on the module
     :return: `InjectionContextOverride` for the deprecated name
     :raises AttributeError: for any other name
     """
     if name == "InjectionContextSingletonOverride":
-        warnings.warn(_SINGLETON_OVERRIDE_DEPRECATION, DeprecationWarning, stacklevel=2)
+        warnings.warn(_deprecation_message(f"{__name__}.InjectionContextSingletonOverride"),
+                      DeprecationWarning, stacklevel=2)
         return InjectionContextOverride
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

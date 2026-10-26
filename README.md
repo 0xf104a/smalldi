@@ -878,7 +878,9 @@ Rules:
   preset, so `Provide[type(instance)]` resolves as in the parent, and several interface fields may hold instances of
   one class, or one object, as may a concrete field and an interface field. `instance` must be an instance of `I`,
   else `TypeError` from `Injector.context()` or `apply()`; a mock built with `spec=I` passes, a class object or a
-  bare mock doesn't.
+  bare mock doesn't. A context opened inside the block shares the preset if it is `SHALLOW`, `PRESERVE` or
+  declared, and has an unbound binding for `I` if it is `RESET` or `STACK`: nothing is constructed there, and the
+  nested block binds `I` itself or gets `RuntimeError` on request. The block's binding is unchanged afterwards.
 * The parent's binding for `I` is never changed, and the parent's other interfaces stay bound in the child, to the
   clones where their singletons are declared. The child is `SHALLOW`, so overriding the block's `I` with an inherited,
   undeclared singleton marks that shared object, and a request through the binding freezes it, as in any `SHALLOW`
