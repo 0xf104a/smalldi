@@ -1,7 +1,10 @@
 # smalldi documentation
 
-The [README](../README.md) introduces each feature with an example and its rules. The pages here describe the
-objects behind the registry and how they behave across contexts and threads.
+The [README](../README.md) introduces each feature with an example and its rules. Two sections start from what you
+want to do: [Features](features/index.md) describes each building block on one short page with a runnable example,
+and [Use cases](use-cases/index.md) shows complete programs for wiring an application, swapping implementations,
+testing, plugins and threads. The pages below describe the objects behind the registry and how they behave across
+contexts and threads.
 
 | Page | What it covers |
 |------|----------------|

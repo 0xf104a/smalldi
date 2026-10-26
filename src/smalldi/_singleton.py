@@ -192,7 +192,7 @@ class LazySingleton:
         """
         Gives the singleton its instance without running a constructor, and freezes it.
 
-        Used by `smalldi.context.InjectionContextSingletonOverride` to bind a
+        Used by `smalldi.context.InjectionContextOverride` to bind a
         ready-made object. The singleton is frozen afterwards like one whose
         instance was requested, so it accepts no override.
 

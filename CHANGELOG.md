@@ -1,4 +1,38 @@
 # Changelog
+## 0.5.1
+### Added
+* `smalldi.ImplementationOf`, an annotation for a field of a `smalldi.context.InjectionContextOverride` subclass: a
+  field `n: ImplementationOf[I]`, `I` an abstract class, gives the block a binding of its own for the interface `I`.
+  Without a value the binding has neither implementation nor override, whatever the parent has, so the block binds it
+  with `@Injector.implements(I)` or `@Injector.override(I)`; a request before that raises `RuntimeError` and freezes
+  the block's binding. An `I` the parent doesn't know is registered in the block only. With a value,
+  `n: ImplementationOf[I] = instance` registers the block's own singleton for `type(instance)` as a concrete field
+  would, then binds it as the frozen implementation of `I`, so `Provide[I]` and `Provide[type(instance)]` are one
+  object in the block; the value is not checked against `I`. `ImplementationOf[I] | None`,
+  `Optional[ImplementationOf[I]]` and `ImplementationOf[I | None]` all declare `I`. The parent's binding for `I` is
+  never changed. Two fields resolving to one singleton, including a preset whose class another field declares, raise
+  `TypeError` at `__enter__`, and nothing is pushed
+* `InterfaceResolver.redeclare(interface, implementation=None)`, which gives an interface a fresh binding, unbound or
+  bound to a frozen implementation, and registers the interface if it isn't; `smalldi.context` calls it on the
+  resolver of a declared context before the context is pushed
+
+* Two sections on the documentation site, `docs/features/` and `docs/use-cases/`, listed in the left sidebar before
+  the in-depth pages: one short page per feature with a runnable example and what to know about it, and one
+  complete program per scenario (wiring an application, swapping implementations, testing, plugins and
+  registries, threads and asyncio); `.github/scripts/check_docs.py` runs their examples and checks their links
+### Changed
+* `smalldi.context.InjectionContextSingletonOverride` is renamed `smalldi.context.InjectionContextOverride`, the
+  base class of a declared context; `Injector.context` takes the subclass or an instance of it under the new name
+* The `TypeError` for a field declaring a plain abstract class names the fix: declare the interface as
+  `n: ImplementationOf[I]`, or declare the singleton class implementing it. `ImplementationOf[C]` with a concrete `C`
+  is refused the same way, naming `n: C`. The `TypeError` for a `Provide[T]` field reads "Provide[T] has no meaning
+  in a declared context; declare the singleton as T"
+
+### Deprecated
+* `smalldi.context.InjectionContextSingletonOverride`, the old name of `InjectionContextOverride`: the same class
+  object, served by a module `__getattr__` that warns with `DeprecationWarning` on every import or attribute access;
+  removal no earlier than 1.0.0
+
 ## 0.5.0
 ### Added
 * `smalldi.context.InjectionContextSingletonOverride`, a dataclass base declaring a `SHALLOW` child context field by

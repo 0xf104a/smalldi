@@ -695,9 +695,10 @@ Rules:
   with everything unfrozen; a `SHALLOW` child shares the parent's frozen state, and `PRESERVE` is the parent.
 
 ## Declared contexts
-`smalldi.context.InjectionContextSingletonOverride` is a dataclass base whose fields declare a `SHALLOW` child
-context: every declared class gets a singleton of its own in the block, and a default value becomes that singleton's
-instance.
+`smalldi.context.InjectionContextOverride` is a dataclass base whose fields declare a `SHALLOW` child context, a
+declared context: every declared class gets a singleton of its own in the block, every interface declared as
+`ImplementationOf[I]` a binding of its own, and a default value becomes that singleton's instance or that interface's
+implementation.
 
 <details>
 <summary>Stormy and Pip come to visit</summary>
@@ -706,8 +707,8 @@ instance.
 import abc
 import dataclasses
 
-from smalldi import Injector, Provide
-from smalldi.context import InjectionContextSingletonOverride
+from smalldi import ImplementationOf, Injector, Provide
+from smalldi.context import InjectionContextOverride
 
 
 @Injector.singleton
@@ -742,7 +743,7 @@ snack_time("Pusheen")  # Pusheen takes a cookie (2 left) and naps on the sofa
 # Stormy comes to visit. She gets her own cookie jar, a snack bowl nobody else
 # has, and a nap spot of her own, while Pusheen's things stay as they are.
 @dataclasses.dataclass
-class StormyVisits(InjectionContextSingletonOverride):
+class StormyVisits(InjectionContextOverride):
     jar: CookieJar                              # the block's own jar, built on first use: full again
     bowl: SnackBowl                             # not registered outside: injectable in the block only
     spot: NapSpot = dataclasses.field(                  # the block's own NapSpot, with a new instance per visit
@@ -770,7 +771,7 @@ class Blanket:
 
 # Pip's blanket is the block's own Blanket; the one outside stays grey.
 @dataclasses.dataclass
-class PipBringsABlanket(InjectionContextSingletonOverride):
+class PipBringsABlanket(InjectionContextOverride):
     blanket: Blanket = dataclasses.field(default_factory=lambda: Blanket("pink"))
 
 
@@ -779,25 +780,71 @@ with Injector.context(PipBringsABlanket):
 print(Injector.get_instance(Blanket).colour)  # grey
 
 
+@Injector.interface
 class Toy(abc.ABC):
     @abc.abstractmethod
     def squeak(self): ...
 
 
+@Injector.implements(Toy)
 @Injector.singleton
 class Ball(Toy):
     def squeak(self):
         return "boing"
 
 
-# A field can't declare an abstract class: Pip declares the Ball, not the Toy.
+class Feather(Toy):
+    def squeak(self):
+        return "swish"
+
+
+@Injector.inject
+def play(who, toy: Provide[Toy] = None):
+    print(f"{who} plays with the {type(toy).__name__.lower()}: {toy.squeak()}")
+
+
+play("Pusheen")  # Pusheen plays with the ball: boing
+
+
+# Pip brings a feather: in the block, Toy is the feather; Pusheen's ball stays bound outside.
 @dataclasses.dataclass
-class PipBringsAToy(InjectionContextSingletonOverride):
+class PipBringsAToy(InjectionContextOverride):
+    toy: ImplementationOf[Toy] = dataclasses.field(default_factory=Feather)
+
+
+with Injector.context(PipBringsAToy):
+    play("Pip")  # Pip plays with the feather: swish
+    print(Injector.get_instance(Toy) is Injector.get_instance(Feather))  # True
+play("Pusheen")  # Pusheen plays with the ball: boing
+
+
+# Stormy picks a toy inside the block: without a value, the block's binding of Toy starts unbound.
+@dataclasses.dataclass
+class StormyPicksAToy(InjectionContextOverride):
+    toy: ImplementationOf[Toy]
+
+
+with Injector.context(StormyPicksAToy):
+    # implement before playing: a request freezes the block's binding
+    @Injector.implements(Toy)
+    @Injector.singleton
+    class Mouse(Toy):
+        def squeak(self):
+            return "squeak"
+
+    play("Stormy")  # Stormy plays with the mouse: squeak
+play("Pusheen")  # Pusheen plays with the ball: boing
+print(Injector.is_singleton(Mouse))  # False
+
+
+# A plain field can't declare an abstract class: the toy is declared as ImplementationOf[Toy].
+@dataclasses.dataclass
+class PipDeclaresTheToy(InjectionContextOverride):
     toy: Toy = Ball()
 
 
 try:
-    with Injector.context(PipBringsAToy):
+    with Injector.context(PipDeclaresTheToy):
         pass
 except TypeError as e:
     print(type(e).__name__)  # TypeError
@@ -807,7 +854,7 @@ except TypeError as e:
 
 Rules:
 
-* Subclass `InjectionContextSingletonOverride`, decorate the subclass with `@dataclasses.dataclass` and pass it to
+* Subclass `InjectionContextOverride`, decorate the subclass with `@dataclasses.dataclass` and pass it to
   `Injector.context`, which returns its usual single-use context manager. The class form, `Injector.context(Fixture)`,
   takes the fields' defaults as the values; the instance form, `Injector.context(Fixture(...))`, takes the instance's
   attributes, and a value of None presets nothing. `Fixture.apply(context)`, on the class or an instance, derives the
@@ -818,10 +865,24 @@ Rules:
 * `name: T` gives the child a `LazySingleton` of its own for `T`. For a registered `T` it is a clone of `T`'s
   singleton, made as `RESET` makes it: same class and override class, no instance, not frozen. Instances created and
   overrides declared for `T` in the block stay in the block, and classes sharing one singleton with `T` share the
-  clone. An unregistered `T` is registered in the child only and constructed on first use.
-* `T` is a concrete class. An abstract class, registered with `@Injector.interface` or not, raises `TypeError` when
-  the context manager is created, on every call. To preset the implementation of an interface, declare the singleton
-  class implementing it; the parent's interfaces stay bound in the child.
+  clone. An unregistered `T` is registered in the child only and constructed on first use. `T` is a concrete class.
+* `name: ImplementationOf[I]`, `I` an abstract class, gives the child a binding of its own for the interface `I`.
+  Without a value the binding has neither implementation nor override, whatever the parent's binding has, so the
+  block binds it with `@Injector.implements(I)` or `@Injector.override(I)` on a singleton registered in the block or
+  declared as a field. A request for `I` before it is bound raises `RuntimeError` and freezes the block's binding. An
+  `I` the parent doesn't know is registered in the child only. `ImplementationOf[I] | None`,
+  `Optional[ImplementationOf[I]]` and `ImplementationOf[I | None]` declare `I` as well.
+* `name: ImplementationOf[I] = instance`, or `dataclasses.field(default_factory=...)`, registers the child's own
+  singleton for `type(instance)` exactly as `name: type(instance) = instance` would, then binds it as the
+  implementation of `I` and freezes the binding: `Provide[I]` and `Provide[type(instance)]` are one object in the
+  block. `instance` is not checked against `I`.
+* The parent's binding for `I` is never changed, and the parent's other interfaces stay bound in the child, to the
+  clones where their singletons are declared. The child is `SHALLOW`, so overriding the block's `I` with an inherited,
+  undeclared singleton marks that shared object, and a request through the binding freezes it, as in any `SHALLOW`
+  child; declare that singleton as a field, or register the implementation in the block.
+* A plain field of an abstract class, registered with `@Injector.interface` or not, raises `TypeError` when the
+  context manager is created, on every call; the message names `ImplementationOf[I]` as the spelling. So does
+  `ImplementationOf[C]` with a concrete `C`; the message names `name: C`.
 * `name: T = instance`, or `dataclasses.field(default_factory=...)`, makes `instance` the instance of the child's
   singleton for `T` and freezes it. The parent never sees it. `instance` is not checked against `T`.
 * A plain default value is one object, preset in every context derived from the class: the class form uses it, and
@@ -829,10 +890,13 @@ Rules:
   `UserWarning` once per class, on first use, and use it as it is. A `default_factory` makes a new object per
   context and doesn't warn; neither does a default of None.
 * A default factory runs once per `Injector.context()` or `apply()` call in the class form, and never in the
-  instance form, where the dataclass constructor ran it already. Two fields of one type, a `Provide[T]` field, an
-  abstract class or an annotation that is not a class raise `TypeError` from `Injector.context()` or `apply()`. The
-  child is built at `__enter__` from the context current then; two fields resolving to one singleton raise
-  `TypeError` there, and nothing is pushed. The parent's objects are never changed.
+  instance form, where the dataclass constructor ran it already. Two fields of one class or interface, a
+  `Provide[T]` field or an annotation that is not a class raise `TypeError` from `Injector.context()` or `apply()`.
+  The child is built at `__enter__` from the context current then; two fields resolving to one singleton, including a
+  preset whose class another field declares, raise `TypeError` there, and nothing is pushed. The parent's objects are
+  never changed.
+* `smalldi.context.InjectionContextSingletonOverride` is a deprecated alias of `InjectionContextOverride`: importing
+  or accessing it warns with `DeprecationWarning`, and it is removed no earlier than 1.0.0.
 
 The [docs](https://github.com/0xf104a/smalldi/blob/master/docs/index.md) have diagrams of what each kind shares with
 its parent and of the per-slice context stacks ([contexts](https://github.com/0xf104a/smalldi/blob/master/docs/contexts.md)),

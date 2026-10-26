@@ -11,18 +11,18 @@ context of the running execution slice, an `asyncio.Task` or a
 `threading.Thread`, which is the root context until `with Injector.context(kind):`
 pushes a child derived from the current one; `kind` is a member of
 `smalldi.context.InjectionSubcontextType`, or an
-`smalldi.context.InjectionContextSingletonOverride` subclass or instance
+`smalldi.context.InjectionContextOverride` subclass or instance
 declaring the child's singletons field by field. A new thread starts in the root
 context unless it is a `smalldi.thread.ContextAwareThread`, which runs in the
 context of the code that created it.
 
-Public names: `Injector`, `Provide` and `SingletonFrozenError` from this
+Public names: `Injector`, `Provide`, `ImplementationOf` and `SingletonFrozenError` from this
 module, the module-level shorthands `singleton`, `interface`, `implements`,
 `override` and `inject` for `Injector.singleton`, `Injector.interface`,
 `Injector.implements`, `Injector.override` and `Injector.inject`, and
 `issingleton` and `isinterface` for `Injector.is_singleton` and
 `Injector.is_interface`, `smalldi.context.InjectionSubcontextType`,
-`smalldi.context.InjectionContextSingletonOverride`,
+`smalldi.context.InjectionContextOverride`,
 `smalldi.decorator.oneshot`, `smalldi.decorator.OneshotLevel` and
 `smalldi.thread.ContextAwareThread`.
 """
@@ -36,17 +36,18 @@ from typing import Any, Callable
 
 from smalldi._context import InjectionContextRegistry
 from smalldi._singleton import LazySingleton, SingletonFrozenError
-from smalldi.annotation import _Provide, Provide
+from smalldi.annotation import _Provide, Provide, ImplementationOf
 from smalldi.asynchronous import wrap_coroutine_function
 from smalldi.concurrency import threadsafe, mutex
 from smalldi.context import (InjectionContext, InjectionSubcontextType, InjectionContextManager,
-                             InjectionContextSingletonOverride, _DeclaredContext)
+                             InjectionContextOverride, _DeclaredContext)
 from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 __all__ = [
+    "ImplementationOf",
     "Injector",
     "Provide",
     "SingletonFrozenError",
@@ -464,8 +465,8 @@ class Injector:
         return target in cls._get_singletons_available()
 
     @classmethod
-    def context(cls, kind: InjectionSubcontextType | type[InjectionContextSingletonOverride]
-                | InjectionContextSingletonOverride = InjectionSubcontextType.RESET) -> InjectionContextManager:
+    def context(cls, kind: InjectionSubcontextType | type[InjectionContextOverride]
+                | InjectionContextOverride = InjectionSubcontextType.RESET) -> InjectionContextManager:
         """
         Returns a single-use context manager that runs a block in a child of the current context.
 
@@ -479,9 +480,10 @@ class Injector:
           `LazySingleton` without an instance, so instances created inside the
           block are gone after it and overrides declared inside it don't leak
           out; see the enum for the other kinds;
-        * a subclass of `InjectionContextSingletonOverride`: the `SHALLOW`
-          child its fields declare, with the fields' defaults as the preset
-          instances;
+        * a subclass of `InjectionContextOverride`: the `SHALLOW` child its
+          fields declare, with the fields' defaults as the preset instances and
+          an `ImplementationOf[I]` field giving the child its own binding of
+          the interface `I`;
         * an instance of such a subclass: the same child, with the instance's
           attributes as the preset instances.
 
@@ -496,16 +498,17 @@ class Injector:
         :raises ValueError: if `kind` is none of the above
         :raises TypeError: for a declared child, if the class inherits dataclass fields without being
             decorated with `@dataclasses.dataclass` itself, a field's annotation is `Provide[T]`, isn't
-            a class or is an abstract class, or two fields declare one class; from `__enter__`, if two
-            fields resolve to one singleton
+            a class, is an abstract class without `ImplementationOf`, is `ImplementationOf[C]` with a
+            concrete `C`, or two fields declare one class; from `__enter__`, if two fields resolve to
+            one singleton
         :raises RuntimeError: from `__enter__`, if the manager was entered before; from `__exit__`,
             if the context it pushed is not the slice's innermost one, in which case nothing is popped
         """
         if isinstance(kind, InjectionSubcontextType):
             return cls._kind_context(kind)
-        if isinstance(kind, type) and issubclass(kind, InjectionContextSingletonOverride):
+        if isinstance(kind, type) and issubclass(kind, InjectionContextOverride):
             return cls._declared_context(kind._from_class())
-        if isinstance(kind, InjectionContextSingletonOverride):
+        if isinstance(kind, InjectionContextOverride):
             return cls._declared_context(kind._from_instance())
         raise ValueError(f"Unknown context kind: {kind}")
 
@@ -536,7 +539,7 @@ class Injector:
     @classmethod
     def _declared_context(cls, declared: _DeclaredContext) -> InjectionContextManager:
         """
-        The `Injector.context` path for an `InjectionContextSingletonOverride` class or instance.
+        The `Injector.context` path for an `InjectionContextOverride` class or instance.
 
         :param declared: the declarations, read from the class or the instance
         :return: the context manager; its `__enter__` derives the child from the context current then

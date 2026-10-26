@@ -141,6 +141,17 @@ class _LazyInterfaceImpl:
         """
         return self.resolve().get_instance()
 
+    @threadsafe
+    def _freeze(self) -> None:
+        """
+        Freezes the binding without resolving it.
+
+        `InterfaceResolver.redeclare` calls it on a binding built for a declared
+        context whose implementation is a preset instance, so the binding
+        refuses an override like one an instance was requested through.
+        """
+        self._frozen = True
+
     def stacked(self) -> '_LazyInterfaceImpl':
         new_instance = self.__class__(self.interface)
         my_impl = None
@@ -255,6 +266,17 @@ class InterfaceResolver:
 
     @threadsafe
     def rewired(self, new_singletons: dict[type, LazySingleton]) -> 'InterfaceResolver':
+        """
+        Returns a new resolver with a new, unfrozen binding per interface, referring to `new_singletons`.
+
+        Each binding's implementation and override are looked up in
+        `new_singletons` by the registered class of the singleton they refer to
+        here, so a binding follows the clone of its singleton; a class absent
+        from `new_singletons` leaves that slot None.
+
+        :param new_singletons: the registry dict of the context being derived
+        :return: the new resolver
+        """
         new_interfaces: dict[type, _LazyInterfaceImpl] = dict()
         for interface, target in self._interfaces.items():
             new_target = _LazyInterfaceImpl(interface)
@@ -270,6 +292,31 @@ class InterfaceResolver:
                                                            None))
             new_interfaces[interface] = new_target
         return InterfaceResolver(new_interfaces)
+
+    @threadsafe
+    def redeclare(self, interface: type, implementation: LazySingleton | None = None) -> None:
+        """
+        Gives `interface` a fresh binding, replacing any, and registers `interface` if it isn't registered.
+
+        Called by `smalldi.context._DeclaredContext.derive` on the resolver of a
+        child context that no slice sees yet, once per `ImplementationOf[I]`
+        field, after `rewired()`. Without `implementation` the binding has
+        neither implementation nor override, so the block binds it with
+        `@Injector.implements` or `@Injector.override`. With `implementation`,
+        a `LazySingleton` owned by the child's registry dict which already
+        holds the preset instance, the binding gets it as its implementation
+        and is frozen. The implementation is not checked against `interface`.
+        The binding is built completely before it is stored.
+
+        :param interface: abstract class to bind
+        :param implementation: the child's `LazySingleton` holding the preset, or None for an unbound binding
+        :raises TypeError: if `interface` isn't abstract
+        """
+        binding = _LazyInterfaceImpl(interface)
+        if implementation is not None:
+            binding.implement(implementation)
+            binding._freeze()
+        self._interfaces[interface] = binding
 
     @threadsafe
     def stacked(self) -> 'InterfaceResolver':

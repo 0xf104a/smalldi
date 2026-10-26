@@ -12,8 +12,24 @@ strict = true
 
 nav = [
   { "Overview" = "index.md" },
-  { "Guides" = [
-    { "Guides" = "docs/index.md" },
+  { "Features" = [
+    { "Features" = "docs/features/index.md" },
+    { "Singletons" = "docs/features/singletons.md" },
+    { "Interfaces and overrides" = "docs/features/interfaces.md" },
+    { "Contexts" = "docs/features/contexts.md" },
+    { "Containers" = "docs/features/containers.md" },
+    { "Utilities" = "docs/features/utilities.md" },
+  ] },
+  { "Use cases" = [
+    { "Use cases" = "docs/use-cases/index.md" },
+    { "Wiring an application" = "docs/use-cases/wiring-an-application.md" },
+    { "Swapping implementations" = "docs/use-cases/swapping-implementations.md" },
+    { "Testing" = "docs/use-cases/testing.md" },
+    { "Plugins and registries" = "docs/use-cases/plugins.md" },
+    { "Threads and asyncio" = "docs/use-cases/threads-and-async.md" },
+  ] },
+  { "In depth" = [
+    { "In depth" = "docs/index.md" },
     { "Architecture" = "docs/architecture.md" },
     { "Contexts" = "docs/contexts.md" },
     { "Concurrency" = "docs/concurrency.md" },

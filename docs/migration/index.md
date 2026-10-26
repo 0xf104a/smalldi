@@ -13,3 +13,9 @@ Upgrading from 0.4 to 0.5 needs no guide: 0.5 changes nothing for 0.4 code. One 
 that `from smalldi import *` also imports the shorthands `singleton`, `interface`, `implements`, `override`,
 `inject`, `issingleton` and `isinterface`, which can shadow names of the same spelling in the importing module;
 the [0.5.0 section of the changelog](../../CHANGELOG.md#050) lists everything added.
+
+Upgrading from 0.5.0 to 0.5.1 needs no guide either. `smalldi.context.InjectionContextSingletonOverride` is the
+deprecated alias of `smalldi.context.InjectionContextOverride`: the same class, so existing subclasses keep working,
+but importing or accessing the alias warns with `DeprecationWarning`; replace the name. `from smalldi import *` also
+imports `ImplementationOf`, which can shadow a name of the same spelling in the importing module; the
+[0.5.1 section of the changelog](../../CHANGELOG.md#051) lists everything added and changed.

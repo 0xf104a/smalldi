@@ -1,5 +1,6 @@
 """
-The `Provide[T]` annotation that marks a parameter for injection, and the helpers reading it.
+The `Provide[T]` annotation that marks a parameter for injection, the `ImplementationOf[I]` annotation that marks an
+interface field of a declared context, and the helpers reading `Provide[T]`.
 """
 import inspect
 from typing import TypeVar, Generic, get_origin, get_args, Iterator, Callable, Any, TypeAlias, Annotated
@@ -56,3 +57,26 @@ class _Provide(Generic[_T]):
                 continue
 
 Provide: TypeAlias = Annotated[_T, _Provide]
+"""
+Marks a parameter of an `@Injector.inject`-decorated function for injection: `p: Provide[T]` receives the instance of
+the registered singleton or interface `T`. `Provide[T]` is `Annotated[T, _Provide]`, so a type checker reads the
+parameter as `T`.
+"""
+
+
+class _ImplementationOf:
+    """
+    Marker behind `ImplementationOf[I]`: a field of `smalldi.context.InjectionContextOverride` annotated with it
+    gives the child context a binding of its own for the interface `I`.
+
+    `ImplementationOf` is `Annotated[I, _ImplementationOf]`, so the marker travels inside `Annotated` metadata and
+    a type checker reads the field as `I`. It has no meaning in `@Injector.inject`.
+    """
+
+
+ImplementationOf: TypeAlias = Annotated[_T, _ImplementationOf]
+"""
+Marks a field of a `smalldi.context.InjectionContextOverride` subclass as the declaration of the abstract class `I`:
+`n: ImplementationOf[I]` gives the child context a binding of its own for the interface `I`, unbound, or bound to the
+field's value. `ImplementationOf[I]` is `Annotated[I, _ImplementationOf]`, so a type checker reads the field as `I`.
+"""

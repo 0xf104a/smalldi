@@ -1,11 +1,12 @@
 """
 Checks the documentation: runs its Python examples, validates its mermaid diagrams and its relative links.
 
-Every ```python block of README.md and docs/*.md that imports smalldi and doesn't call `input(` runs in its
-own process, from a temporary directory, with `src` on `sys.path`. Every ```mermaid block of docs/*.md is
-parsed by mermaid under Node, through check_mermaid.mjs next to this script, which needs `mermaid` and
-`jsdom` resolvable from the repository root. Every relative Markdown link of README.md and docs/*.md must
-point to an existing file. The exit status is non-zero when any check fails.
+Every ```python block of README.md, docs/*.md, docs/features/*.md and docs/use-cases/*.md that imports smalldi
+and doesn't call `input(` runs in its own process, from a temporary directory, with `src` on `sys.path`. Every
+```mermaid block of those pages is parsed by mermaid under Node, through check_mermaid.mjs next to this script,
+which needs `mermaid` and `jsdom` resolvable from the repository root. Every relative Markdown link of those pages
+must point to an existing file. The exit status is non-zero when any check fails. The migration guides are not
+checked: their before/after snippets show code that fails on purpose.
 """
 import json
 import os
@@ -35,8 +36,11 @@ class Block:
         return f"{self.file.relative_to(ROOT)}:{self.line}"
 
 
+DOC_DIRS = ["docs", "docs/features", "docs/use-cases"]
+
+
 def documents() -> list[Path]:
-    return [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
+    return [ROOT / "README.md", *(page for d in DOC_DIRS for page in sorted((ROOT / d).glob("*.md")))]
 
 
 def parse(path: Path) -> tuple[list[Block], list[tuple[int, str]]]:
@@ -124,7 +128,7 @@ def main() -> int:
         for block in blocks:
             if is_example(block) and not run_example(block):
                 failures += 1
-            if block.language == "mermaid" and path.parent == ROOT / "docs":
+            if block.language == "mermaid" and ROOT / "docs" in path.parents:
                 mermaid_blocks.append(block)
         if not check_links(path, prose):
             failures += 1
