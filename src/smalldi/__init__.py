@@ -478,11 +478,8 @@ class Injector:
         :return: a context manager whose `__enter__` returns the new `InjectionContext`
         :raises ValueError: if `kind` is none of the above
         :raises TypeError: for a declared child, if a field's annotation is `Provide[T]` or isn't a
-            class, or two fields declare one class; from `__enter__`, if a `CopyOf[T]` names an
-            unregistered class, two fields resolve to one singleton, or a copied or preset interface
-            has no implementation
-        :raises SingletonFrozenError: from `__enter__` of a declared child, if a default is set on a
-            shared singleton that is frozen
+            class, or two fields declare one class; from `__enter__`, if two fields resolve to one
+            singleton, or a preset interface has no implementation
         :raises RuntimeError: from `__enter__`, if the manager was entered before; from `__exit__`,
             if the context it pushed is not the slice's innermost one, in which case nothing is popped
         """

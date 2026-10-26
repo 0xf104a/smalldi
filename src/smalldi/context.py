@@ -6,8 +6,8 @@ An `InjectionContext` holds one registry of singletons and one of interfaces.
 pushed with `with Injector.context(kind):`; every decorator and every instance
 request goes to the context on top of the current slice's stack, or to the root
 when nothing is pushed. `InjectionSubcontextType` names the five ways a child
-context is derived from its parent. `InjectionContextSingletonOverride` and
-`CopyOf[T]` declare a `SHALLOW` child with chosen singletons as a dataclass.
+context is derived from its parent. `InjectionContextSingletonOverride`
+declares a `SHALLOW` child with singletons of its own as a dataclass.
 """
 import copy
 import dataclasses
@@ -16,7 +16,7 @@ import functools
 import types
 from contextlib import AbstractContextManager
 from inspect import isabstract
-from typing import (Annotated, Any, Callable, ClassVar, TypeAlias, TypeVar, TYPE_CHECKING, Union, cast,
+from typing import (Annotated, Any, Callable, ClassVar, TYPE_CHECKING, Union, cast,
                     get_args, get_origin, get_type_hints)
 
 from smalldi._singleton import LazySingleton, SingletonFrozenError
@@ -229,34 +229,18 @@ class InjectionContextManager(AbstractContextManager):
             self.injector._context_registry.pop_context(self._token)
 
 
-_T = TypeVar("_T")
-
-
-class _CopyOf:
-    """
-    Marker behind `CopyOf[T]`: the field gives the child context its own copy of `T`'s singleton.
-
-    `CopyOf` is `Annotated[T, _CopyOf]`, so the marker travels inside `Annotated` metadata.
-    """
-
-
-CopyOf: TypeAlias = Annotated[_T, _CopyOf]
-
-
 class _Field:
     """
     One declared field of an `InjectionContextSingletonOverride` subclass, read once per class.
 
     :ivar name: the field name
     :ivar tp: the declared class `T`
-    :ivar copy: True for `CopyOf[T]`
     :ivar default: zero-argument callable returning the class-level default: the field's default
         value, the result of its default factory, or None when it has neither
     """
-    def __init__(self, name: str, tp: type, copy: bool, default: Callable[[], Any]):
+    def __init__(self, name: str, tp: type, default: Callable[[], Any]):
         self.name = name
         self.tp = tp
-        self.copy = copy
         self.default = default
 
 
@@ -266,13 +250,11 @@ class _Declaration:
 
     :ivar name: the field name, for error messages
     :ivar tp: the declared singleton or interface
-    :ivar copy: True for `CopyOf[T]`
     :ivar instance: the value to preset, or None to preset nothing
     """
     def __init__(self, field: _Field, instance: Any):
         self.name = field.name
         self.tp = field.tp
-        self.copy = field.copy
         self.instance = instance
 
     @property
@@ -300,7 +282,7 @@ class _DeclaredContext:
         :param d: the declaration
         :return: `(registered, target)`: `target` is the singleton of `d.tp`, or the one its interface
             binding resolves to, and None if `d.tp` isn't registered or is an interface without a binding
-        :raises TypeError: if `d` copies or presets an interface that has no implementation
+        :raises TypeError: if `d` presets an interface that has no implementation
         """
         singletons = parent.singletons_available
         if d.tp in singletons:
@@ -310,35 +292,29 @@ class _DeclaredContext:
             return False, None
         binding = resolver.get_binding(d.tp)
         target = binding.override_singleton or binding.implementation_singleton
-        if target is None and (d.copy or d.has_instance):
+        if target is None and d.has_instance:
             raise TypeError(f"Field {d.name!r}: interface {d.tp.__name__} has no implementation to work on")
         return True, target
 
     def derive(self, parent: InjectionContext) -> InjectionContext:
         """
-        Derives the `SHALLOW` child of `parent` with the declared singletons.
+        Derives the `SHALLOW` child of `parent` with the declared singletons of its own.
 
-        Every check runs first, on a private copy of the registry dict; the
-        shared `LazySingleton` objects are touched only after every field
-        passed, so a failure leaves `parent` as it was.
+        `parent` and its `LazySingleton` objects are only read: every object
+        the child gets is new, so a failure leaves `parent` as it was.
 
         :param parent: the context to derive the child from
         :return: the child context, not pushed
-        :raises TypeError: if a `CopyOf[T]` names an unregistered class, two fields resolve to one
-            singleton, or a copied or preset interface has no implementation
-        :raises SingletonFrozenError: if a default is set on a shared singleton that is frozen
+        :raises TypeError: if two fields resolve to one singleton, or a preset interface has no
+            implementation
         """
         singletons = copy.copy(parent.singletons_available)
         clones: dict[int, LazySingleton] = dict()
         claimed: dict[int, str] = dict()
-        presets: list[tuple[LazySingleton, Any]] = []
         new_interfaces: list[tuple[type, LazySingleton | None]] = []
         for d in self.declarations:
             registered, target = self._target_of(parent, d)
             if not registered:
-                if d.copy:
-                    raise TypeError(f"Field {d.name!r}: CopyOf[{d.tp.__name__}] needs a registered class, "
-                                    f"and {d.tp.__name__} is not registered")
                 if not isabstract(d.tp):
                     fresh = LazySingleton(d.tp)
                     if d.has_instance:
@@ -353,22 +329,16 @@ class _DeclaredContext:
                 else:
                     new_interfaces.append((d.tp, None))
                 continue
-            if target is None or not (d.copy or d.has_instance):
-                continue  # shared with the parent as it is
+            if target is None:
+                continue  # an interface without a binding: nothing to give the child
             other = claimed.get(id(target))
             if other is not None:
                 raise TypeError(f"Fields {other!r} and {d.name!r} resolve to one singleton; declare it once")
             claimed[id(target)] = d.name
-            if d.copy:
-                cloned = target.clone()
-                if d.has_instance:
-                    cloned.set_instance(d.instance)
-                clones[id(target)] = cloned
-            else:
-                if target.frozen:
-                    raise SingletonFrozenError(f"Field {d.name!r}: singleton {d.tp.__name__} was already frozen")
-                presets.append((target, d.instance))
-        # Every check passed: build the child, then touch the shared singletons.
+            cloned = target.clone()
+            if d.has_instance:
+                cloned.set_instance(d.instance)
+            clones[id(target)] = cloned
         for key, registered_singleton in list(singletons.items()):
             cloned = clones.get(id(registered_singleton))
             if cloned is not None:
@@ -378,8 +348,6 @@ class _DeclaredContext:
             resolver.register(tp)
             if implementation is not None:
                 resolver.get_binding(tp).implement(implementation)
-        for target, instance in presets:
-            target.set_instance(instance)
         return InjectionContext(singletons, resolver)
 
 
@@ -398,16 +366,16 @@ class _hybridmethod:
 
 class InjectionContextSingletonOverride:
     """
-    Base class whose fields declare a `SHALLOW` child context with chosen singletons.
+    Base class whose fields declare a `SHALLOW` child context with singletons of its own.
 
     Subclass it, decorate the subclass with `@dataclasses.dataclass`, and
     declare one field per class the block needs::
 
         @dataclasses.dataclass
         class StormyVisits(InjectionContextSingletonOverride):
-            jar: CopyOf[CookieJar]                             # the block's own copy of the jar
-            bowl: SnackBowl                                    # injectable in the block only
-            spot: CopyOf[NapSpot] = NapSpot("the windowsill")  # the block's own NapSpot, preset
+            jar: CookieJar                              # the block's own CookieJar, built on first use
+            bowl: SnackBowl                             # not registered outside: injectable in the block only
+            spot: NapSpot = NapSpot("the windowsill")   # the block's own NapSpot, with this instance
 
         with Injector.context(StormyVisits):                          # the class: its defaults
             ...
@@ -417,32 +385,28 @@ class InjectionContextSingletonOverride:
     `apply(context)` on the class or an instance derives the same child from
     a given context and returns it unpushed. Every class not declared is shared
     with the parent: the child's registry dict is new, but it holds the
-    parent's `LazySingleton` objects. Each field is one of:
+    parent's `LazySingleton` objects. Each declared `T` gets a singleton of
+    its own in the child:
 
-    * `n: T`: `T` is injectable. An unregistered `T` is registered in the
-      child only, as an interface if it is abstract and as a singleton
-      otherwise; a registered `T` is left as it is;
-    * `n: CopyOf[T]`: the child's own `LazySingleton` for `T`, cloned as the
-      `RESET` kind clones it: same class and override class, no instance, not
-      frozen. Classes sharing that singleton with `T` share the copy; for an
-      interface, the singleton it resolves to is copied. `T` must be
-      registered;
-    * `n: T = instance`: `T`'s singleton gets `instance` and is frozen. For a
-      registered `T` that is the shared singleton, so the parent injects
-      `instance` from then on, and a frozen one raises `SingletonFrozenError`;
-      for an interface it is the singleton it resolves to. An unregistered
-      `T` is registered in the child only, with `instance`;
-    * `n: CopyOf[T] = instance`: the copy gets `instance`, so the preset is
-      scoped to the block.
+    * a registered `T` gets a clone of its singleton, made as the `RESET`
+      kind makes it: same class and override class, no instance, not frozen.
+      Instances created and overrides declared for `T` in the block stay in
+      the block. Classes sharing that singleton with `T` share the clone;
+      for an interface, the singleton it resolves to is cloned and the
+      child's bindings refer to the clone;
+    * an unregistered `T` is registered in the child only, as an interface
+      if it is abstract and as a singleton otherwise.
 
-    A value of None presets nothing, so None itself can't be preset, and
-    `T | None = None` makes a field optional in the instance form. A value is
-    injected as is, it isn't checked against `T`. The field types are read
-    once per class; the values once per `Injector.context(...)` call, when a
-    default factory runs too. The checks run at `__enter__`, against the context
-    current then and before anything changes. `Provide[T]` has no meaning
-    here and is rejected. A subclass without the dataclass decorator works
-    through its annotations and class attributes, in the class form.
+    `n: T = instance` gives the child's singleton `instance` and freezes it;
+    the parent never sees it. A value of None presets nothing, so None
+    itself can't be preset, and `T | None = None` makes a field optional in
+    the instance form. A value is injected as is, it isn't checked against
+    `T`. The field types are read once per class; the values once per
+    `Injector.context(...)` call, when a default factory runs too. The checks
+    run at `__enter__`, against the context current then; the parent is
+    never changed. `Provide[T]` has no meaning here and is rejected. A
+    subclass without the dataclass decorator works through its annotations
+    and class attributes, in the class form.
     """
 
     @_hybridmethod
@@ -458,9 +422,7 @@ class InjectionContextSingletonOverride:
         :param context: the context to derive the child from
         :return: the child context, not pushed
         :raises TypeError: if a field's annotation is `Provide[T]` or isn't a class, two fields declare
-            one class, a `CopyOf[T]` names an unregistered class, two fields resolve to one singleton, or
-            a copied or preset interface has no implementation
-        :raises SingletonFrozenError: if a default is set on a shared singleton that is frozen
+            one class, two fields resolve to one singleton, or a preset interface has no implementation
         """
         if isinstance(self_or_cls, type):
             declared = self_or_cls._from_class()
@@ -520,41 +482,38 @@ class InjectionContextSingletonOverride:
         fields: list[_Field] = []
         seen: dict[type, str] = dict()
         for name, default in sources:
-            tp, is_copy = cls._unwrap(name, hints[name])
+            tp = cls._unwrap(name, hints[name])
             if tp in seen:
                 raise TypeError(f"Fields {seen[tp]!r} and {name!r} both declare {tp.__name__}")
             seen[tp] = name
-            fields.append(_Field(name, tp, is_copy, default))
+            fields.append(_Field(name, tp, default))
         return tuple(fields)
 
     @staticmethod
-    def _unwrap(name: str, hint: Any) -> tuple[type, bool]:
+    def _unwrap(name: str, hint: Any) -> type:
         """
         Extracts the declared class from a field annotation.
 
-        `T | None` and `Optional[T]` declare `T`; `CopyOf[T]` declares `T` as a copy; other
-        metadata of `Annotated[T, ...]` is dropped.
+        `T | None` and `Optional[T]` declare `T`; metadata of `Annotated[T, ...]` is dropped.
 
         :param name: the field name, for error messages
         :param hint: the resolved annotation
-        :return: `(T, copy)`
+        :return: the declared class
         :raises TypeError: if `hint` is `Provide[T]`, or doesn't declare exactly one class
         """
         if get_origin(hint) in (Union, types.UnionType):
             members = [m for m in get_args(hint) if m is not type(None)]
             if len(members) == 1:
                 hint = members[0]
-        is_copy = False
         if get_origin(hint) is Annotated:
             inner, *meta = get_args(hint)
             if any(m is _Provide for m in meta):
                 raise TypeError(f"Field {name!r}: Provide[T] has no meaning in a context override; "
-                                f"declare the singleton as T or CopyOf[T]")
-            is_copy = any(m is _CopyOf for m in meta)
+                                f"declare the singleton as T")
             hint = inner
         if not isinstance(hint, type) or get_origin(hint) is not None:
-            raise TypeError(f"Field {name!r}: {hint!r} is not a class; declare a singleton as T or CopyOf[T]")
-        return hint, is_copy
+            raise TypeError(f"Field {name!r}: {hint!r} is not a class; declare a singleton as T")
+        return hint
 
 
 def _identity(value: Any) -> Any:
