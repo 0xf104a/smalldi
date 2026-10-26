@@ -18,6 +18,9 @@
   stores nothing, a re-entrant call for the same key while the first call runs raises `RuntimeError`, and concurrent
   first calls run the function once, the other callers waiting for its result
 * `LazySingleton.set_instance(instance)`, which binds a ready-made instance and freezes the singleton
+* Module-level shorthands for the `Injector` methods of the same names: `smalldi.singleton`, `smalldi.interface`,
+  `smalldi.implements`, `smalldi.override` and `smalldi.inject` for the decorators, `smalldi.issingleton` and
+  `smalldi.isinterface` for the registration checks, all acting on the current context
 * A documentation site on Read the Docs: `zensical.toml`, `.readthedocs.yaml` and `.github/scripts/stage_docs.py`
   build README.md, `docs/`, CHANGELOG.md, llms.txt and a mkdocstrings API reference with Zensical, styled by the
   Material 3 stylesheet `docs/assets/material3.css`; the CI docs job builds the site in strict mode. The site

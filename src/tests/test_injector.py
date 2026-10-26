@@ -4,7 +4,18 @@ from abc import ABC, abstractmethod
 
 import pytest
 
-from smalldi import Injector, Provide, SingletonFrozenError
+from smalldi import (
+    Injector,
+    Provide,
+    SingletonFrozenError,
+    implements,
+    inject,
+    interface,
+    isinterface,
+    issingleton,
+    override,
+    singleton,
+)
 from smalldi.context import InjectionSubcontextType
 
 
@@ -499,3 +510,83 @@ def test_inject_async_function_preserves_metadata():
         assert wrapped.__qualname__ == fn.__qualname__
         assert wrapped.__doc__ == fn.__doc__
         assert wrapped.__wrapped__ is fn
+
+
+def test_module_level_predicates(reset_injector):
+    """issingleton and isinterface answer like Injector.is_singleton and Injector.is_interface, for the current context"""
+    class Plain:
+        pass
+
+    class Base(ABC):
+        @abstractmethod
+        def run(self): ...
+
+    assert not issingleton(Plain)
+    assert not isinterface(Plain)
+    assert not isinterface(Base)
+
+    @Injector.singleton
+    class Service:
+        pass
+
+    Injector.interface(Base)
+
+    assert issingleton(Service)
+    assert not isinterface(Service)
+    assert isinterface(Base)
+    assert not issingleton(Base)
+
+    with Injector.context(InjectionSubcontextType.RESET):
+        class Late:
+            pass
+
+        Injector.singleton(Late)
+        assert issingleton(Late)
+        assert issingleton(Service)
+    assert not issingleton(Late)
+
+
+def test_module_level_decorators(reset_injector):
+    """singleton, interface, implements, override and inject behave like the Injector classmethods"""
+    @interface
+    class Greeter(ABC):
+        @abstractmethod
+        def greet(self) -> str: ...
+
+    @implements(Greeter)
+    @singleton
+    class Plain(Greeter):
+        def greet(self) -> str:
+            return "hello"
+
+    @singleton
+    class Counter:
+        pass
+
+    @override(Counter)
+    @singleton
+    class BetterCounter(Counter):
+        pass
+
+    @inject
+    def use(greeter: Provide[Greeter], counter: Provide[Counter]):
+        return greeter.greet(), counter
+
+    assert isinterface(Greeter)
+    assert issingleton(Plain)
+    assert issingleton(Counter)
+    greeting, counter = use()
+    assert greeting == "hello"
+    assert isinstance(counter, BetterCounter)
+    assert counter is Injector.get_instance(Counter)
+
+    with pytest.raises(TypeError):
+        interface(Plain)
+    with pytest.raises(TypeError):
+        singleton(Counter)
+
+    @override(Counter, when=lambda: False)
+    class Skipped(Counter):
+        pass
+
+    assert not issingleton(Skipped)

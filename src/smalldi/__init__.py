@@ -17,7 +17,9 @@ context unless it is a `smalldi.thread.ContextAwareThread`, which runs in the
 context of the code that created it.
 
 Public names: `Injector`, `Provide` and `SingletonFrozenError` from this
-module, `smalldi.context.InjectionSubcontextType` and
+module, the module-level shorthands `singleton`, `interface`, `implements`,
+`override`, `inject`, `issingleton` and `isinterface` for the `Injector`
+methods of the same names, `smalldi.context.InjectionSubcontextType` and
 `smalldi.thread.ContextAwareThread`.
 """
 import functools
@@ -39,8 +41,19 @@ from smalldi.decorator import staticclass
 
 __author__ = "Anna-Sofia Kasierocka"
 __email__ = "f104a@f104a.io"
-__version__ = "0.4.0"
-__all__ = ["Injector", "Provide", "SingletonFrozenError"]
+__version__ = "0.5.0"
+__all__ = [
+    "Injector",
+    "Provide",
+    "SingletonFrozenError",
+    "implements",
+    "inject",
+    "interface",
+    "isinterface",
+    "issingleton",
+    "override",
+    "singleton",
+]
 
 
 class _SingletonsAvailable:
@@ -559,3 +572,96 @@ class Injector:
         :return: the `InjectionContext` every decorator and instance request of this slice uses
         """
         return cls._context_registry.current_context
+
+
+def singleton(target_cls):
+    """
+    Registers a class as a singleton, to be instantiated on first use.
+
+    Module-level shorthand for `Injector.singleton`.
+
+    :param target_cls: class to register
+    :return: `target_cls`, unchanged
+    :raises TypeError: if `target_cls` is abstract, or is already registered
+    """
+    return Injector.singleton(target_cls)
+
+
+def interface(target_cls):
+    """
+    Registers an abstract class as an interface that singletons may implement or override.
+
+    Module-level shorthand for `Injector.interface`.
+
+    :param target_cls: abstract class (an `abc.ABC` subclass with at least one abstract method)
+    :return: `target_cls`, unchanged
+    :raises TypeError: if `target_cls` is not abstract, or is already registered as an interface
+    """
+    return Injector.interface(target_cls)
+
+
+def override(what: type, when: Callable[[], bool] = lambda: True):
+    """
+    Returns the decorator that makes a registered singleton injected instead of `what`.
+
+    Module-level shorthand for `Injector.override`; apply the decorator above
+    `@singleton`.
+
+    :param what: registered interface or singleton to override
+    :param when: A function returning True if the override should be applied
+    :return: decorator taking the overriding class and returning it unchanged
+    """
+    return Injector.override(what, when)
+
+
+def implements(what: type):
+    """
+    Returns the decorator that declares a registered singleton as the implementation of interface `what`.
+
+    Module-level shorthand for `Injector.implements`; apply the decorator
+    above `@singleton`.
+
+    :param what: registered interface
+    :return: decorator taking the implementing class and returning it unchanged
+    """
+    return Injector.implements(what)
+
+
+def inject(fn):
+    """
+    Makes a function receive the instance of every parameter annotated with `Provide[T]`.
+
+    Module-level shorthand for `Injector.inject`.
+
+    :param fn: function or coroutine function whose `Provide[T]` parameters are to be provided
+    :return: the wrapped function
+    :raises TypeError: if a `Provide[T]` parameter names a class that is neither a registered
+        singleton nor a registered interface
+    """
+    return Injector.inject(fn)
+
+
+def issingleton(target: type) -> bool:
+    """
+    Tells whether a class is registered as a singleton in the current context.
+
+    Module-level shorthand for `Injector.is_singleton`, named after the
+    `inspect.isclass` family of predicates.
+
+    :param target: class to check
+    :return: True if `target` was registered with `@Injector.singleton` in the current context
+    """
+    return Injector.is_singleton(target)
+
+
+def isinterface(tp: type) -> bool:
+    """
+    Tells whether a class is registered as an interface in the current context.
+
+    Module-level shorthand for `Injector.is_interface`, named after the
+    `inspect.isclass` family of predicates.
+
+    :param tp: class to check
+    :return: True if `tp` was registered with `@Injector.interface` in the current context
+    """
+    return Injector.is_interface(tp)

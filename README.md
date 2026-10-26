@@ -80,7 +80,10 @@ DI container inside the library. Injector provides these decorators:
 
 Besides the decorators, `Injector.get_instance(T)` returns the instance for a registered singleton or interface,
 creating it if needed, and `Injector.context(kind)` opens a [context](#contexts) in which registrations, overrides and
-instances are scoped to a `with` block.
+instances are scoped to a `with` block. `Injector.is_singleton(cls)` and `Injector.is_interface(cls)` tell how a class
+is registered in the current context. The `smalldi` module exports `singleton`, `interface`, `implements`, `override`,
+`inject`, `issingleton` and `isinterface` as shorthands for the `Injector` methods of the same names, so
+`from smalldi import singleton` and `@singleton` work like `@Injector.singleton`.
 
 ## How singletons work
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
