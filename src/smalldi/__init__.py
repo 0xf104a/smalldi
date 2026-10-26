@@ -18,8 +18,12 @@ context of the code that created it.
 
 Public names: `Injector`, `Provide` and `SingletonFrozenError` from this
 module, the module-level shorthands `singleton`, `interface`, `implements`,
-`override`, `inject`, `issingleton` and `isinterface` for the `Injector`
-methods of the same names, `smalldi.context.InjectionSubcontextType` and
+`override` and `inject` for `Injector.singleton`, `Injector.interface`,
+`Injector.implements`, `Injector.override` and `Injector.inject`, and
+`issingleton` and `isinterface` for `Injector.is_singleton` and
+`Injector.is_interface`, `smalldi.context.InjectionSubcontextType`,
+`smalldi.context.InjectionContextSingletonOverride`,
+`smalldi.decorator.oneshot`, `smalldi.decorator.OneshotLevel` and
 `smalldi.thread.ContextAwareThread`.
 """
 import functools

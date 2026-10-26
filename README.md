@@ -81,9 +81,10 @@ DI container inside the library. Injector provides these decorators:
 Besides the decorators, `Injector.get_instance(T)` returns the instance for a registered singleton or interface,
 creating it if needed, and `Injector.context(kind)` opens a [context](#contexts) in which registrations, overrides and
 instances are scoped to a `with` block. `Injector.is_singleton(cls)` and `Injector.is_interface(cls)` tell how a class
-is registered in the current context. The `smalldi` module exports `singleton`, `interface`, `implements`, `override`,
-`inject`, `issingleton` and `isinterface` as shorthands for the `Injector` methods of the same names, so
-`from smalldi import singleton` and `@singleton` work like `@Injector.singleton`.
+is registered in the current context. The `smalldi` module exports `singleton`, `interface`, `implements`, `override`
+and `inject` as shorthands for `Injector.singleton`, `Injector.interface`, `Injector.implements`, `Injector.override`
+and `Injector.inject`, and `issingleton` and `isinterface` as shorthands for `Injector.is_singleton` and
+`Injector.is_interface`, so `from smalldi import singleton` and `@singleton` work like `@Injector.singleton`.
 
 ## How singletons work
 Singletons are classes having a single instance. In `smalldi` singletons may not take constructor(`__init__`) other
@@ -865,6 +866,54 @@ and the locking model ([concurrency](https://github.com/0xf104a/smalldi/blob/mas
       state.pop("__instance_mutex__", None)
       return state
 ```
+
+### Oneshot
+`smalldi.decorator.oneshot` makes a function run once per level and return the first result on every later call.
+
+<details>
+<summary>Pusheen's snack cupboard</summary>
+
+```python
+import dataclasses
+
+from smalldi.decorator import oneshot, OneshotLevel
+
+
+@oneshot
+def open_cupboard():
+    print("creak")
+    return ["cookie", "tuna", "cookie"]
+
+
+print(open_cupboard() is open_cupboard())  # creak, then True: opened once, same list
+
+
+@dataclasses.dataclass
+class Cat:
+    name: str
+
+    @oneshot(OneshotLevel.PER_INSTANCE)
+    def favourite_snack(self):
+        print(f"{self.name} picks")
+        return open_cupboard()[0]
+
+
+pusheen, stormy = Cat("Pusheen"), Cat("Stormy")
+print(pusheen.favourite_snack())  # Pusheen picks, then cookie
+print(pusheen.favourite_snack())  # cookie: Pusheen picked already
+print(stormy.favourite_snack())   # Stormy picks, then cookie: Stormy picks for herself
+```
+
+</details>
+
+Rules:
+
+* `@oneshot` and `@oneshot()` are the `GLOBAL` level: the function runs once everywhere. `@oneshot(OneshotLevel.PER_CLASS)`
+  runs it once per class, the `cls` of a classmethod or `type(self)` of an instance method;
+  `@oneshot(OneshotLevel.PER_INSTANCE)` runs it once per instance, on instance methods only.
+* On a classmethod or a staticmethod, `@oneshot` goes above `@classmethod` / `@staticmethod`.
+* A call that raises stores nothing, so the next call runs the function again. A re-entrant call for the same key
+  raises `RuntimeError`. Concurrent first calls run the function once; the other callers wait for its result.
 
 ## Collector
 `Collector` is a class which imports all modules in order execute decorators.
